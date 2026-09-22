@@ -648,14 +648,34 @@ class _SessionPageState extends State<SessionPage> {
   @override
   Widget build(BuildContext context) {
     final records = _sorted;
+    // 子agent 页是 push 出来的路由：leading 给返回箭头（回上一级，通常即主agent）；
+    // 外壳直接承载的主会话页保留汉堡菜单开抽屉。
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
+    final isSubagent = widget.summary.parentSessionId != null;
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(icon: const Icon(Icons.menu), onPressed: widget.onOpenDrawer),
+        leading: IconButton(
+          icon: Icon(canPop ? Icons.arrow_back : Icons.menu),
+          tooltip: canPop ? '返回上级' : '菜单',
+          onPressed: () {
+            final nav = Navigator.of(context);
+            if (nav.canPop()) {
+              nav.pop();
+            } else {
+              widget.onOpenDrawer();
+            }
+          },
+        ),
         title: Text(
-          widget.summary.title.isEmpty ? widget.summary.sessionId : widget.summary.title,
+          '${isSubagent ? '子agent · ' : ''}${widget.summary.title.isEmpty ? widget.summary.sessionId : widget.summary.title}',
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          if (isSubagent && canPop)
+            TextButton(
+              onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+              child: const Text('主agent'),
+            ),
           IconButton(
             onPressed: _showSubagents,
             tooltip: '子agent',
