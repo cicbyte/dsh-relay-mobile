@@ -7,7 +7,7 @@ DSH 的 Flutter 移动端客户端（Android 优先），通过 DSH 服务端协
 - 抽屉外壳布局（参考 ZCode mobile / Cherry Studio 范式）：侧边栏 = 会话列表直达 + 连接状态行 + 入口行，主区 = 对话视图
 - 两种连接模式：
   - **局域网直连**：手机直达 dsh web（adb reverse / 同 Wi-Fi + trustedHosts）
-  - **云端转发**：relay（Rust，公网 VPS）→ 桌面桥 → 本机 dsh web，不在局域网也能用（见 `relay/README.md`）。桌面桥已插件化：`relay/dsh-plugin-mobile-bridge/` 装进 dsh profile（cordis bundle）随 dsh 启停，配置走 `$DSH_HOME/mobile-bridge.json`
+  - **云端转发**：relay（Rust，公网 VPS）→ 桌面桥 → 本机 dsh web，不在局域网也能用（协议与自测见 [`../dsh-relay-service/README.md`](../dsh-relay-service/README.md)）。桌面桥已插件化：[`../dsh-relay-plugin/`](../dsh-relay-plugin) 装进 dsh profile（cordis bundle）随 dsh 启停，配置走设置页「手机通道」或兜底 `$DSH_HOME/mobile-bridge.json`
 - 会话列表：`session/list`（标题来自 projections、running 状态、cwd、时间）
 - 会话详情：`session/follow` 快照 + 事件渲染（用户/助手消息气泡、工具调用卡片、turn 分隔）、
   `session/prompt` 发消息、`session/cancel` 停止当前轮、`session/page` 历史翻页
