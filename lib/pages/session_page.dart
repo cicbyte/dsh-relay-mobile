@@ -556,12 +556,19 @@ class _SessionPageState extends State<SessionPage> {
       if (r.ignorable) continue;
       switch (r.type) {
         case 'user/message':
-          out.add(_messageBubble(
-            label: '你',
-            body: _blockWidgets(r.data['content']),
-            time: r.time,
-            copyText: _contentText(r.data['content']),
-          ));
+          // source.kind 区分人工提问与合成注入（文件变动通知、skill、cron 等）：
+          // 注入不冒充「你」，以灰行呈现。
+          final src = Map<String, dynamic>.from(r.data['source'] as Map? ?? {});
+          if (src['kind'] != null && src['kind'] != 'user') {
+            out.add(_injectionTile(r, src));
+          } else {
+            out.add(_messageBubble(
+              label: '你',
+              body: _blockWidgets(r.data['content']),
+              time: r.time,
+              copyText: _contentText(r.data['content']),
+            ));
+          }
         case 'assistant/message':
           final msg = Map<String, dynamic>.from(r.data['message'] as Map? ?? {});
           final body = <Widget>[];
@@ -623,7 +630,130 @@ class _SessionPageState extends State<SessionPage> {
     return out;
   }
 
+  /// 展示标题：最近一条 session/title 事件优先（自动改题实时反映），其次 summary。
+  String _displayTitle(List<WireRecord> records) {
+    var title = widget.summary.title;
+    for (final r in records) {
+      if (r.type != 'session/title') continue;
+      final t = '${r.data['title'] ?? ''}'.trim();
+      if (t.isNotEmpty) title = t;
+    }
+    return title.isEmpty ? widget.summary.sessionId : title;
+  }
+
+  /// 单行事件胶囊：图标 + 主文 + 可选副文，用于生命周期/状态类事件。
+  Widget _chipTile({
+    required IconData icon,
+    required Color color,
+    required String text,
+    String? sub,
+  }) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(text,
+                    style: theme.textTheme.labelSmall?.copyWith(color: color)),
+                if (sub != null && sub.trim().isNotEmpty)
+                  Text(sub.trim(),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// todo/write：任务清单整表快照（计划/执行进度一目了然）。
+  Widget _todoTile(WireRecord r) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final todos = (r.data['todos'] as List? ?? []).whereType<Map>().toList();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 14),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(Icons.checklist, size: 13, color: scheme.primary),
+              const SizedBox(width: 6),
+              Text('任务清单',
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: scheme.primary)),
+            ]),
+            const SizedBox(height: 6),
+            for (final t in todos)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      switch ('${t['status'] ?? ''}') {
+                        'completed' => Icons.check_circle_outline,
+                        'in_progress' => Icons.timelapse,
+                        _ => Icons.circle_outlined,
+                      },
+                      size: 13,
+                      color: switch ('${t['status'] ?? ''}') {
+                        'completed' => Colors.greenAccent,
+                        'in_progress' => Colors.amberAccent,
+                        _ => scheme.onSurfaceVariant,
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text('${t['content'] ?? ''}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            decoration: '${t['status'] ?? ''}' == 'completed'
+                                ? TextDecoration.lineThrough
+                                : null,
+                          )),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 合成注入（source.kind != user）：文件变动通知、skill、cron、goal 续轮等。
+  Widget _injectionTile(WireRecord r, Map<String, dynamic> source) {
+    final kind = '${source['kind'] ?? 'plugin'}';
+    final summary = '${source['summary'] ?? ''}'.trim();
+    final text = summary.isNotEmpty
+        ? summary
+        : _contentText(r.data['content']).trim().split('\n').first;
+    return _chipTile(
+      icon: Icons.input,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      text: '注入 · $kind',
+      sub: text,
+    );
+  }
+
   Widget _systemTile(WireRecord r) {
+    final scheme = Theme.of(context).colorScheme;
     switch (r.type) {
       case 'turn/start':
         return Padding(
@@ -639,8 +769,146 @@ class _SessionPageState extends State<SessionPage> {
               style: Theme.of(context).textTheme.bodySmall
                   ?.copyWith(fontStyle: FontStyle.italic)),
         );
+      // ---- 计划 / 任务 ----
+      case 'todo/write':
+        return _todoTile(r);
+      case 'plan/mode':
+        final active = r.data['active'] == true;
+        return _chipTile(
+            icon: Icons.map_outlined,
+            color: Colors.lightBlueAccent,
+            text: active ? '计划模式 · 开启' : '计划模式 · 关闭');
+      // ---- 询问 / 授权 ----
+      case 'approval/asked':
+        final tool = '${r.data['toolName'] ?? '工具'}';
+        final reason = '${r.data['reason'] ?? ''}';
+        return _chipTile(
+            icon: Icons.lock_outline,
+            color: Colors.orangeAccent,
+            text: '授权询问 · $tool',
+            sub: reason.isEmpty ? '等待授权' : reason);
+      case 'approval/decided':
+        final outcome = '${r.data['outcome'] ?? ''}';
+        final label = switch (outcome) {
+          'allowed-once' => '允许一次',
+          'rejected' => '拒绝',
+          'cancelled' => '取消',
+          'unavailable' => '不可用',
+          _ => outcome,
+        };
+        final ok = outcome == 'allowed-once';
+        return _chipTile(
+            icon: ok ? Icons.lock_open_outlined : Icons.block_outlined,
+            color: ok ? Colors.greenAccent : scheme.error,
+            text: '授权结果 · $label');
+      // ---- 子agent ----
+      case 'subagent/descriptor':
+        final mode = '${r.data['mode'] ?? ''}';
+        return _chipTile(
+            icon: Icons.account_tree_outlined,
+            color: Colors.tealAccent,
+            text:
+                '子agent · ${mode == 'one-shot' ? '一次性' : '可续聊'}',
+            sub: '${r.data['provider'] ?? ''}');
+      // ---- 后台任务（workflow 运行记录） ----
+      case 'tool-workflow/run-start':
+        return _chipTile(
+            icon: Icons.run_circle_outlined,
+            color: Colors.cyanAccent,
+            text: '后台任务 · ${r.data['name'] ?? ''}',
+            sub: '${r.data['runId'] ?? ''}');
+      case 'tool-workflow/agent-start':
+        return _chipTile(
+            icon: Icons.person_add_alt_outlined,
+            color: Colors.cyanAccent,
+            text: '后台成员 #${r.data['seq'] ?? '?'} · ${r.data['label'] ?? ''}',
+            sub: '${r.data['phase'] ?? ''}');
+      case 'tool-workflow/agent-end':
+        return _chipTile(
+            icon: Icons.done_all,
+            color: Colors.cyanAccent,
+            text: '后台成员完成 #${r.data['seq'] ?? '?'} · ${r.data['outcome'] ?? ''}');
+      case 'tool-workflow/run-end':
+        return _chipTile(
+            icon: Icons.stop_circle_outlined,
+            color: Colors.cyanAccent,
+            text: '后台任务结束 · ${r.data['stopReason'] ?? ''}');
+      // ---- 命令 ----
+      case 'command/run':
+        final args = '${r.data['args'] ?? ''}';
+        return _chipTile(
+            icon: Icons.terminal,
+            color: Colors.amberAccent,
+            text: '命令 · /${r.data['name'] ?? ''}${args.isEmpty ? '' : ' $args'}');
+      case 'command/done':
+        if (r.data['kind'] != 'error') return const SizedBox.shrink();
+        return _chipTile(
+            icon: Icons.error_outline,
+            color: scheme.error,
+            text: '命令失败 · ${r.data['text'] ?? ''}');
+      // ---- 上下文压缩 ----
+      case 'compaction/start':
+        return _chipTile(
+            icon: Icons.compress,
+            color: Colors.purpleAccent,
+            text: '上下文压缩 · 开始');
+      case 'compaction/summary':
+        final n = (r.data['shadowedTokenCount'] as num? ?? 0).toInt();
+        return _chipTile(
+            icon: Icons.compress,
+            color: Colors.purpleAccent,
+            text: '上下文压缩 · 完成',
+            sub: n > 0 ? '压缩 ${_fmtTokens(n)} tokens' : null);
+      case 'compaction/end':
+        if (r.data['error'] == null) return const SizedBox.shrink();
+        return _chipTile(
+            icon: Icons.error_outline,
+            color: scheme.error,
+            text: '上下文压缩 · 失败');
+      // ---- 目标 ----
+      case 'goal/change':
+        final goal = Map<String, dynamic>.from(r.data['goal'] as Map? ?? {});
+        final objective =
+            '${goal['objective'] ?? goal['goalId'] ?? ''}';
+        final op = '${r.data['operation'] ?? ''}';
+        return _chipTile(
+            icon: Icons.flag_outlined,
+            color: Colors.pinkAccent,
+            text: '目标 · ${op == 'clear' ? '已清除' : objective.isEmpty ? op : objective}');
+      // ---- 交付物 ----
+      case 'deliverables/presented':
+        final files = (r.data['files'] as List? ?? []).whereType<Map>().toList();
+        final paths = files
+            .map((f) => '${f['path'] ?? ''}')
+            .where((s) => s.isNotEmpty)
+            .join('、');
+        return _chipTile(
+            icon: Icons.inventory_2_outlined,
+            color: Colors.greenAccent,
+            text: '交付物 · ${files.length} 个文件',
+            sub: paths);
+      // ---- 状态小事件 ----
+      case 'model/selection':
+        return _chipTile(
+            icon: Icons.tune,
+            color: scheme.onSurfaceVariant,
+            text: '模型 · ${r.data['model'] ?? r.data['modelId'] ?? ''}');
+      case 'agent-preset/selected':
+        return _chipTile(
+            icon: Icons.smart_toy_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '预设 · ${r.data['agentPreset'] ?? ''}');
+      case 'sandbox/mode':
+        return _chipTile(
+            icon: Icons.security_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '沙箱 · ${r.data['mode'] ?? ''}');
       default:
-        // step/*、request/header、compaction/*、turn/end 等协议事件不渲染
+        // 协议内部噪声不渲染：step/*、turn/end、request/*、assistant/attempt、
+        // llm/retry*、hook/*、feedback/*、session/(end-seed|title-llm-request)、
+        // session-log-deepseek/*、subagent/(catalog|model-selection-policy)、
+        // approval/policy、permission/preset、schedule/change、team/*、web/*、
+        // tool/ptc-dispatch*。session/title 无气泡（标题已实时反映）。
         return const SizedBox.shrink();
     }
   }
@@ -667,7 +935,7 @@ class _SessionPageState extends State<SessionPage> {
           },
         ),
         title: Text(
-          '${isSubagent ? '子agent · ' : ''}${widget.summary.title.isEmpty ? widget.summary.sessionId : widget.summary.title}',
+          '${isSubagent ? '子agent · ' : ''}${_displayTitle(records)}',
           overflow: TextOverflow.ellipsis,
         ),
         actions: [

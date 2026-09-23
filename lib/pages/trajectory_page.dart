@@ -182,6 +182,29 @@ class _TrajectoryPageState extends State<TrajectoryPage> {
         return _firstLine(_plainText(msg['content']));
       case 'system/message':
         return _firstLine(_plainText(r.data['content'] ?? r.data['message']));
+      case 'todo/write':
+        final n = (r.data['todos'] as List? ?? []).length;
+        return '任务清单 · $n 项';
+      case 'approval/asked':
+        return '授权询问 · ${r.data['toolName'] ?? ''}';
+      case 'approval/decided':
+        return '授权结果 · ${r.data['outcome'] ?? ''}';
+      case 'plan/mode':
+        return r.data['active'] == true ? '计划模式 · 开启' : '计划模式 · 关闭';
+      case 'tool-workflow/run-start':
+        return '后台任务 · ${r.data['name'] ?? ''}';
+      case 'tool-workflow/run-end':
+        return '后台任务结束 · ${r.data['stopReason'] ?? ''}';
+      case 'command/run':
+        return '命令 · /${r.data['name'] ?? ''}';
+      case 'compaction/summary':
+        return '上下文压缩 · 完成';
+      case 'goal/change':
+        final goal = Map<String, dynamic>.from(r.data['goal'] as Map? ?? {});
+        return '目标 · ${goal['objective'] ?? goal['goalId'] ?? r.data['operation'] ?? ''}';
+      case 'deliverables/presented':
+        final n = (r.data['files'] as List? ?? []).length;
+        return '交付物 · $n 个文件';
       default:
         return '';
     }
@@ -204,6 +227,14 @@ class _TrajectoryPageState extends State<TrajectoryPage> {
     if (type.startsWith('tool/')) return Colors.orangeAccent;
     if (type.startsWith('compaction/')) return Colors.purpleAccent;
     if (type.startsWith('step/')) return scheme.onSurfaceVariant.withValues(alpha: 0.6);
+    if (type.startsWith('todo/')) return Colors.greenAccent;
+    if (type.startsWith('approval/')) return Colors.orangeAccent;
+    if (type.startsWith('plan/')) return Colors.lightBlueAccent;
+    if (type.startsWith('subagent/') || type.startsWith('tool-workflow/')) {
+      return Colors.cyanAccent;
+    }
+    if (type.startsWith('goal/')) return Colors.pinkAccent;
+    if (type.startsWith('command/')) return Colors.amberAccent;
     return scheme.onSurfaceVariant;
   }
 
