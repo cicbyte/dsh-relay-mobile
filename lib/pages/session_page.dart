@@ -1142,6 +1142,11 @@ class _ToolCallCardState extends State<_ToolCallCard> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final done = e.hasResult;
+    // 询问工具：参数是结构化 questions，直接渲染问题卡而非原始 JSON。
+    if (e.name == 'ask_user_question') {
+      final questions = _parseMapList(e.arguments, 'questions');
+      if (questions.isNotEmpty) return _questionCard(context, e, questions);
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1222,6 +1227,146 @@ class _ToolCallCardState extends State<_ToolCallCard> {
           ),
       ]),
     );
+  }
+
+  /// 从工具参数/结果 JSON 里安全取出对象列表（解析失败返回空 → 走通用卡兜底）。
+  List<Map<String, dynamic>> _parseMapList(String json, String key) {
+    try {
+      final j = jsonDecode(json);
+      final list = (j is Map ? j[key] as List? : null) ?? const [];
+      return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// ask_user_question 问题卡：问题/选项/多选标注 + 回答展示。
+  Widget _questionCard(
+      BuildContext context, _ToolEntry e, List<Map<String, dynamic>> questions) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final answers = _parseMapList(e.resultText, 'answers');
+
+    String answerFor(String id) {
+      for (final a in answers) {
+        if ('${a['id']}' != id) continue;
+        final sel = (a['selected'] as List? ?? []).whereType<String>();
+        final custom = '${a['custom'] ?? ''}'.trim();
+        return [...sel, if (custom.isNotEmpty) custom].join('、');
+      }
+      return '';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 14),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(
+              color: (e.hasResult ? Colors.greenAccent : Colors.orangeAccent)
+                  .withValues(alpha: 0.5)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.question_answer_outlined,
+                size: 14,
+                color: e.hasResult ? Colors.greenAccent : Colors.orangeAccent),
+            const SizedBox(width: 6),
+            Text('询问 · ${questions.length} 个问题',
+                style: theme.textTheme.labelMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const Spacer(),
+            if (!e.hasResult)
+              SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 1.8, color: scheme.primary))
+            else
+              const Icon(Icons.check, size: 14, color: Colors.greenAccent),
+            if (e.durationMs != null) ...[
+              const SizedBox(width: 6),
+              Text(_fmtDuration(e.durationMs!),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7))),
+            ],
+          ]),
+          const SizedBox(height: 10),
+          for (var i = 0; i < questions.length; i++) ...[
+            if (i > 0) const SizedBox(height: 10),
+            _questionBlock(context, i, questions[i],
+                answerFor('${questions[i]['id'] ?? ''}'), e.hasResult),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _questionBlock(BuildContext context, int index, Map<String, dynamic> q,
+      String answer, bool hasResult) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final header = '${q['header'] ?? ''}'.trim();
+    final question = '${q['question'] ?? ''}'.trim();
+    final multi = q['multi_select'] == true;
+    final options = (q['options'] as List? ?? []).whereType<Map>().toList();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (header.isNotEmpty)
+        Text(header, style: theme.textTheme.labelSmall?.copyWith(color: scheme.primary)),
+      if (question.isNotEmpty) ...[
+        if (header.isNotEmpty) const SizedBox(height: 2),
+        Text(question, style: theme.textTheme.bodyMedium),
+      ],
+      if (options.isNotEmpty) ...[
+        const SizedBox(height: 5),
+        for (final o in options)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(multi ? Icons.check_box_outline_blank : Icons.radio_button_unchecked,
+                  size: 13, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${o['label'] ?? ''}', style: theme.textTheme.bodySmall),
+                  if ('${o['description'] ?? ''}'.trim().isNotEmpty)
+                    Text('${o['description']}'.trim(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant.withValues(alpha: 0.8))),
+                ]),
+              ),
+            ]),
+          ),
+        if (multi)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text('（可多选）',
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(color: scheme.onSurfaceVariant)),
+          ),
+      ],
+      const SizedBox(height: 5),
+      if (answer.isEmpty && !hasResult)
+        Text('等待回答…',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: scheme.onSurfaceVariant))
+      else if (answer.isEmpty)
+        Text('（未作答）',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: scheme.onSurfaceVariant))
+      else
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.check_circle, size: 13, color: Colors.greenAccent),
+          const SizedBox(width: 6),
+          Expanded(
+              child: Text(answer,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: Colors.greenAccent))),
+        ]),
+    ]);
   }
 
   Widget _copyIcon(String text) {
