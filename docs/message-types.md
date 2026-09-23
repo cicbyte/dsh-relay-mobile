@@ -41,14 +41,29 @@
 `approval/policy`、`permission/preset`、`schedule/change`、`team/*`、`web/*`、
 `tool/ptc-dispatch*`。
 
-## 展示 ✓ / 交互 ✗（后续特性）
+## 展示 ✓ / 交互 ✓（#782 已实现手机作答）
 
 | 能力 | 展示 | 手机上操作 | 说明 |
 |---|---|---|---|
-| 授权询问（approval） | ✓ 询问+结果行 | ✗ | 应答走 host↔client presentation waterfall 协议（非普通 RPC），需独立实现 |
-| ask_user 提问 | ✓ 工具卡片 | ✗ | 同上；回答同样走交互通道 |
+| 授权询问（approval） | ✓ 询问+结果行 | ✓ | 待答时作答区**替代输入框**：允许一次/拒绝；或「留给网页端」 |
+| ask_user 提问 | ✓ 问题卡（选项瓷砖/自由填/回答药丸） | ✓ | 作答区替代输入框：选项点选（多选）、自由填、逐题跳过、批量提交 |
 | todo 清单 | ✓ 清单卡 | ✗ | `todo/write` 为只读快照（写侧是 agent 的 todo 工具） |
 | 子agent | ✓ 节点行 + 目录/进入/中断/发消息 | ✓ | 已有（subagents/list、prompt、interrupt） |
+
+### 交互协议（`$events` Remote 事件流）
+
+host Cordis waterfall（`user-questions/request` / `approval/request`）经
+`dsh-api-gateway` 派发到所有客户端；手机侧 `lib/dsh/interactions.dart`：
+
+- 下行流端点 `$events`（args 必须为空对象）：首帧 `{type:'ready', clientId}`，
+  随后 `{type:'waterfall', event, eventId, agentId, request}` /
+  `{type:'cancel', eventId}`；连接时服务端补投 pending，断线无需对账。
+- 上行一元 RPC `$events/result`，args=`{clientId, eventId, outcome}`：
+  `{kind:'result', value}` 应答 / `{kind:'next'}` 转交下一监听者（网页端）/
+  `{kind:'rejected', error}` 拒绝。
+- 询问应答批次 `{answers:[{id, selected[], custom?}]}`：跳过=`{id,selected:[]}`；
+  单选+自由填时 selected 清空。授权应答值 = `'allowed-once'` / `'rejected'`。
+- 注意字段双拼：工具参数侧 `multi_select`，waterfall 请求侧 `multiSelect`。
 
 ## 词表更新机制
 

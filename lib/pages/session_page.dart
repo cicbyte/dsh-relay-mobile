@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 
 import '../device_info.dart';
 import '../dsh/dsh_client.dart';
+import '../dsh/interactions.dart';
+import '../widgets/interaction_composer.dart';
 import '../widgets/markdown_text.dart';
 import 'trajectory_page.dart';
 
@@ -95,6 +97,7 @@ class _SessionPageState extends State<SessionPage> {
   void initState() {
     super.initState();
     _mux = DshMux(widget.client);
+    InteractionCenter.I.ensureStarted(widget.client);
     // 断线自动重连后自动重订阅（避免人工点重试）
     _mux.onReconnected = _openFollow;
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -1009,32 +1012,48 @@ class _SessionPageState extends State<SessionPage> {
                 ),
               ]),
             ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
-              child: Row(children: [
-                Expanded(
-                  child: TextField(
-                    controller: _inputCtrl,
-                    minLines: 1,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      hintText: '输入消息…',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    onSubmitted: (_) => _send(),
+          ValueListenableBuilder(
+            valueListenable: InteractionCenter.I.pending,
+            builder: (context, _, __) {
+              final pending = InteractionCenter.I.forAgent(widget.summary.sessionId);
+              if (pending != null) {
+                return SafeArea(
+                  child: InteractionComposer(
+                    interaction: pending,
+                    onAnswer: (eventId, value) =>
+                        InteractionCenter.I.answer(eventId, value),
+                    onPass: (eventId) => InteractionCenter.I.pass(eventId),
                   ),
+                );
+              }
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+                  child: Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _inputCtrl,
+                        minLines: 1,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          hintText: '输入消息…',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onSubmitted: (_) => _send(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      onPressed: _sending ? null : _send,
+                      icon: _sending
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.send),
+                    ),
+                  ]),
                 ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: _sending ? null : _send,
-                  icon: _sending
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.send),
-                ),
-              ]),
-            ),
+              );
+            },
           ),
         ],
       ),
@@ -1247,14 +1266,11 @@ class _ToolCallCardState extends State<_ToolCallCard> {
     final scheme = theme.colorScheme;
     final answers = _parseMapList(e.resultText, 'answers');
 
-    String answerFor(String id) {
+    Map<String, dynamic>? answerOf(String id) {
       for (final a in answers) {
-        if ('${a['id']}' != id) continue;
-        final sel = (a['selected'] as List? ?? []).whereType<String>();
-        final custom = '${a['custom'] ?? ''}'.trim();
-        return [...sel, if (custom.isNotEmpty) custom].join('、');
+        if ('${a['id']}' == id) return a;
       }
-      return '';
+      return null;
     }
 
     return Padding(
@@ -1262,10 +1278,11 @@ class _ToolCallCardState extends State<_ToolCallCard> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
               color: (e.hasResult ? Colors.greenAccent : Colors.orangeAccent)
-                  .withValues(alpha: 0.5)),
-          borderRadius: BorderRadius.circular(10),
+                  .withValues(alpha: 0.45)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -1294,9 +1311,9 @@ class _ToolCallCardState extends State<_ToolCallCard> {
           ]),
           const SizedBox(height: 10),
           for (var i = 0; i < questions.length; i++) ...[
-            if (i > 0) const SizedBox(height: 10),
+            if (i > 0) const Divider(height: 16),
             _questionBlock(context, i, questions[i],
-                answerFor('${questions[i]['id'] ?? ''}'), e.hasResult),
+                answerOf('${questions[i]['id'] ?? ''}'), e.hasResult),
           ],
         ]),
       ),
@@ -1304,68 +1321,106 @@ class _ToolCallCardState extends State<_ToolCallCard> {
   }
 
   Widget _questionBlock(BuildContext context, int index, Map<String, dynamic> q,
-      String answer, bool hasResult) {
+      Map<String, dynamic>? answer, bool hasResult) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final header = '${q['header'] ?? ''}'.trim();
     final question = '${q['question'] ?? ''}'.trim();
     final multi = q['multi_select'] == true;
     final options = (q['options'] as List? ?? []).whereType<Map>().toList();
+    final selected =
+        ((answer?['selected'] as List?) ?? const []).whereType<String>().toSet();
+    final custom = '${answer?['custom'] ?? ''}'.trim();
+    final answered = answer != null;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (header.isNotEmpty)
-        Text(header, style: theme.textTheme.labelSmall?.copyWith(color: scheme.primary)),
+        Text(header,
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600)),
       if (question.isNotEmpty) ...[
         if (header.isNotEmpty) const SizedBox(height: 2),
         Text(question, style: theme.textTheme.bodyMedium),
       ],
       if (options.isNotEmpty) ...[
-        const SizedBox(height: 5),
-        for (final o in options)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(multi ? Icons.check_box_outline_blank : Icons.radio_button_unchecked,
-                  size: 13, color: scheme.onSurfaceVariant),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('${o['label'] ?? ''}', style: theme.textTheme.bodySmall),
-                  if ('${o['description'] ?? ''}'.trim().isNotEmpty)
-                    Text('${o['description']}'.trim(),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurfaceVariant.withValues(alpha: 0.8))),
+        const SizedBox(height: 6),
+        Wrap(spacing: 6, runSpacing: 5, children: [
+          for (final o in options)
+            Builder(builder: (context) {
+              final label = '${o['label'] ?? ''}';
+              final isSel = selected.contains(label);
+              return Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isSel
+                      ? Colors.greenAccent.withValues(alpha: 0.18)
+                      : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                      color: isSel
+                          ? Colors.greenAccent.withValues(alpha: 0.6)
+                          : scheme.outlineVariant.withValues(alpha: 0.5)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(
+                      multi
+                          ? (isSel
+                              ? Icons.check_box
+                              : Icons.check_box_outline_blank)
+                          : (isSel
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_unchecked),
+                      size: 12,
+                      color:
+                          isSel ? Colors.greenAccent : scheme.onSurfaceVariant),
+                  const SizedBox(width: 5),
+                  Text(label, style: theme.textTheme.labelSmall),
                 ]),
+              );
+            }),
+        ]),
+        if (selected.isNotEmpty)
+          for (final o in options)
+            if ('${o['description'] ?? ''}'.trim().isNotEmpty &&
+                selected.contains('${o['label']}'))
+              Padding(
+                padding: const EdgeInsets.only(left: 4, top: 3),
+                child: Text('${o['description']}'.trim(),
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: scheme.onSurfaceVariant)),
               ),
-            ]),
-          ),
-        if (multi)
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text('（可多选）',
-                style: theme.textTheme.labelSmall
-                    ?.copyWith(color: scheme.onSurfaceVariant)),
-          ),
       ],
-      const SizedBox(height: 5),
-      if (answer.isEmpty && !hasResult)
+      const SizedBox(height: 6),
+      if (!hasResult)
         Text('等待回答…',
             style: theme.textTheme.labelSmall
                 ?.copyWith(color: scheme.onSurfaceVariant))
-      else if (answer.isEmpty)
+      else if (!answered)
         Text('（未作答）',
             style: theme.textTheme.labelSmall
                 ?.copyWith(color: scheme.onSurfaceVariant))
       else
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Icon(Icons.check_circle, size: 13, color: Colors.greenAccent),
-          const SizedBox(width: 6),
-          Expanded(
-              child: Text(answer,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: Colors.greenAccent))),
-        ]),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.greenAccent.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.check_circle, size: 13, color: Colors.greenAccent),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                [
+                  ...selected,
+                  if (custom.isNotEmpty) custom,
+                ].join('、'),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: Colors.greenAccent),
+              ),
+            ),
+          ]),
+        ),
     ]);
   }
 
