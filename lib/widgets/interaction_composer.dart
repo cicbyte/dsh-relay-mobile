@@ -31,6 +31,7 @@ class _InteractionComposerState extends State<InteractionComposer> {
   late List<Map<String, dynamic>> _questions;
   late List<_QuestionDraft> _drafts;
   bool _busy = false;
+  int _page = 0;
 
   @override
   void initState() {
@@ -52,6 +53,7 @@ class _InteractionComposerState extends State<InteractionComposer> {
   void _reset() {
     _questions = widget.interaction.questions;
     _drafts = List.generate(_questions.length, (_) => _QuestionDraft());
+    _page = 0;
   }
 
   @override
@@ -91,6 +93,7 @@ class _InteractionComposerState extends State<InteractionComposer> {
       }
     }
     if (missing >= 0) {
+      setState(() => _page = missing);
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('第 ${missing + 1} 题还没作答（可选选项、填文字或跳过）')));
       return;
@@ -100,6 +103,30 @@ class _InteractionComposerState extends State<InteractionComposer> {
         _answerOf(_questions[i], _drafts[i]),
     ];
     _run(() => widget.onAnswer(widget.interaction.eventId, {'answers': answers}));
+  }
+
+  /// 单选且非末题：点选项自动进下一题（与 web 端一致）。
+  void _select(Map<String, dynamic> q, _QuestionDraft d, String label) {
+    final multi = q['multiSelect'] == true;
+    setState(() {
+      if (multi) {
+        d.selected.contains(label)
+            ? d.selected.remove(label)
+            : d.selected.add(label);
+      } else {
+        d.selected
+          ..clear()
+          ..add(label);
+        d.custom.clear();
+      }
+    });
+    if (!multi && _page < _questions.length - 1) {
+      Future.delayed(const Duration(milliseconds: 220), () {
+        if (mounted && d.selected.contains(label)) {
+          setState(() => _page++);
+        }
+      });
+    }
   }
 
   Map<String, dynamic> _answerOf(Map<String, dynamic> q, _QuestionDraft d) {
@@ -143,7 +170,9 @@ class _InteractionComposerState extends State<InteractionComposer> {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                approval ? '工具请求授权' : '等待你回答 · ${_questions.length} 个问题',
+                approval
+                    ? '工具请求授权'
+                    : '回答询问 · 第 ${_page + 1}/${_questions.length} 题',
                 style: theme.textTheme.labelMedium
                     ?.copyWith(fontWeight: FontWeight.w600),
               ),
@@ -189,26 +218,39 @@ class _InteractionComposerState extends State<InteractionComposer> {
               ),
             ]),
           ] else ...[
+            // 一屏一题（与 web 端一致）：选项天然不用滚动，底部翻页/提交。
             Flexible(
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (var i = 0; i < _questions.length; i++)
-                      _questionEditor(i),
-                  ],
+                  children: [_questionEditor(_page)],
                 ),
               ),
             ),
             const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: _busy ? null : _submit,
-                child: Text(_busy ? '提交中…' : '提交回答'),
+            Row(children: [
+              if (_page > 0)
+                OutlinedButton(
+                  onPressed: _busy
+                      ? null
+                      : () => setState(() => _page--),
+                  child: const Text('上一题'),
+                ),
+              const Spacer(),
+              FilledButton(
+                onPressed: _busy
+                    ? null
+                    : (_page < _questions.length - 1
+                        ? () => setState(() => _page++)
+                        : _submit),
+                child: Text(_busy
+                    ? '提交中…'
+                    : _page < _questions.length - 1
+                        ? '下一题'
+                        : '提交回答'),
               ),
-            ),
+            ]),
           ],
         ],
       ),
@@ -244,18 +286,7 @@ class _InteractionComposerState extends State<InteractionComposer> {
                 borderRadius: BorderRadius.circular(9),
                 onTap: d.skipped
                     ? null
-                    : () => setState(() {
-                          if (multi) {
-                            isSel
-                                ? d.selected.remove(label)
-                                : d.selected.add(label);
-                          } else {
-                            d.selected
-                              ..clear()
-                              ..add(label);
-                            d.custom.clear();
-                          }
-                        }),
+                    : () => _select(q, d, label),
                 child: Container(
                   margin: const EdgeInsets.only(bottom: 4),
                   padding:
