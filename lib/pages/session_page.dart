@@ -1343,26 +1343,29 @@ class _ToolCallCardState extends State<_ToolCallCard> {
       ],
       if (options.isNotEmpty) ...[
         const SizedBox(height: 6),
-        Wrap(spacing: 6, runSpacing: 5, children: [
-          for (final o in options)
-            Builder(builder: (context) {
-              final label = '${o['label'] ?? ''}';
-              final isSel = selected.contains(label);
-              return Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                decoration: BoxDecoration(
-                  color: isSel
-                      ? Colors.greenAccent.withValues(alpha: 0.18)
-                      : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(
-                      color: isSel
-                          ? Colors.greenAccent.withValues(alpha: 0.6)
-                          : scheme.outlineVariant.withValues(alpha: 0.5)),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(
+        // 选项一列一行（标签 + 描述常显），回答按行展示，细节不丢失。
+        for (final o in options)
+          Builder(builder: (context) {
+            final label = '${o['label'] ?? ''}';
+            final desc = '${o['description'] ?? ''}'.trim();
+            final isSel = selected.contains(label);
+            return Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSel
+                    ? Colors.greenAccent.withValues(alpha: 0.13)
+                    : scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: isSel
+                        ? Colors.greenAccent.withValues(alpha: 0.5)
+                        : scheme.outlineVariant.withValues(alpha: 0.4)),
+              ),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(
                       multi
                           ? (isSel
                               ? Icons.check_box
@@ -1370,57 +1373,95 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                           : (isSel
                               ? Icons.radio_button_checked
                               : Icons.radio_button_unchecked),
-                      size: 12,
+                      size: 13,
                       color:
                           isSel ? Colors.greenAccent : scheme.onSurfaceVariant),
-                  const SizedBox(width: 5),
-                  Text(label, style: theme.textTheme.labelSmall),
-                ]),
-              );
-            }),
-        ]),
-        if (selected.isNotEmpty)
-          for (final o in options)
-            if ('${o['description'] ?? ''}'.trim().isNotEmpty &&
-                selected.contains('${o['label']}'))
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(label,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                                fontWeight:
+                                    isSel ? FontWeight.w600 : null)),
+                        if (desc.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 1),
+                            child: Text(desc,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                    color: scheme.onSurfaceVariant)),
+                          ),
+                      ]),
+                ),
+              ]),
+            );
+          }),
+        if (multi)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text('（可多选）',
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(color: scheme.onSurfaceVariant)),
+          ),
+      ],
+      if (!hasResult) ...[
+        const SizedBox(height: 6),
+        Text('等待回答…',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: scheme.onSurfaceVariant)),
+      ] else if (!answered) ...[
+        const SizedBox(height: 6),
+        Text('（未作答）',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: scheme.onSurfaceVariant)),
+      ] else if (selected.isEmpty && custom.isEmpty) ...[
+        const SizedBox(height: 6),
+        Text('（已跳过）',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: scheme.onSurfaceVariant)),
+      ] else ...[
+        // 回答一行一个：每条选项答案一行（含描述），自由填单独一行。
+        const SizedBox(height: 8),
+        for (final o in options)
+          if (selected.contains('${o['label']}')) ...[
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 1),
+                child:
+                    Icon(Icons.check_circle, size: 13, color: Colors.greenAccent),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text('${o['label']}',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: Colors.greenAccent)),
+              ),
+            ]),
+            if ('${o['description'] ?? ''}'.trim().isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(left: 4, top: 3),
+                padding: const EdgeInsets.only(left: 19, top: 1, bottom: 3),
                 child: Text('${o['description']}'.trim(),
                     style: theme.textTheme.labelSmall
                         ?.copyWith(color: scheme.onSurfaceVariant)),
               ),
-      ],
-      const SizedBox(height: 6),
-      if (!hasResult)
-        Text('等待回答…',
-            style: theme.textTheme.labelSmall
-                ?.copyWith(color: scheme.onSurfaceVariant))
-      else if (!answered)
-        Text('（未作答）',
-            style: theme.textTheme.labelSmall
-                ?.copyWith(color: scheme.onSurfaceVariant))
-      else
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-          decoration: BoxDecoration(
-            color: Colors.greenAccent.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.check_circle, size: 13, color: Colors.greenAccent),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                [
-                  ...selected,
-                  if (custom.isNotEmpty) custom,
-                ].join('、'),
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: Colors.greenAccent),
-              ),
+          ],
+        if (custom.isNotEmpty)
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(Icons.short_text,
+                  size: 13, color: Colors.greenAccent.shade200),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(custom,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: Colors.greenAccent)),
             ),
           ]),
-        ),
+      ],
     ]);
   }
 

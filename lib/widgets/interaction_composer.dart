@@ -124,6 +124,10 @@ class _InteractionComposerState extends State<InteractionComposer> {
     return Container(
       margin: const EdgeInsets.fromLTRB(10, 4, 10, 8),
       padding: const EdgeInsets.all(12),
+      // 限高：选项多时内部滚动，不把页面底部顶溢出（曾溢出 68px）。
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.6,
+      ),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(14),
@@ -188,6 +192,7 @@ class _InteractionComposerState extends State<InteractionComposer> {
             Flexible(
               child: SingleChildScrollView(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     for (var i = 0; i < _questions.length; i++)
@@ -229,19 +234,21 @@ class _InteractionComposerState extends State<InteractionComposer> {
                 ?.copyWith(fontWeight: FontWeight.w500)),
         if (options.isNotEmpty) ...[
           const SizedBox(height: 6),
-          Wrap(spacing: 6, runSpacing: 4, children: [
-            for (final o in options)
-              FilterChip(
-                label: Text('${o['label'] ?? ''}',
-                    style: theme.textTheme.labelSmall),
-                visualDensity: VisualDensity.compact,
-                selected: d.selected.contains('${o['label']}'),
-                onSelected: d.skipped
+          // 选项一列一行：标签 + 描述常显，整行可点选/取消。
+          for (final o in options)
+            Builder(builder: (context) {
+              final label = '${o['label'] ?? ''}';
+              final desc = '${o['description'] ?? ''}'.trim();
+              final isSel = d.selected.contains(label);
+              return InkWell(
+                borderRadius: BorderRadius.circular(9),
+                onTap: d.skipped
                     ? null
-                    : (sel) => setState(() {
-                          final label = '${o['label']}';
+                    : () => setState(() {
                           if (multi) {
-                            sel ? d.selected.add(label) : d.selected.remove(label);
+                            isSel
+                                ? d.selected.remove(label)
+                                : d.selected.add(label);
                           } else {
                             d.selected
                               ..clear()
@@ -249,17 +256,69 @@ class _InteractionComposerState extends State<InteractionComposer> {
                             d.custom.clear();
                           }
                         }),
-              ),
-          ]),
-          for (final o in options)
-            if ('${o['description'] ?? ''}'.trim().isNotEmpty &&
-                d.selected.contains('${o['label']}'))
-              Padding(
-                padding: const EdgeInsets.only(left: 4, top: 2),
-                child: Text('${o['description']}'.trim(),
-                    style: theme.textTheme.labelSmall
-                        ?.copyWith(color: scheme.onSurfaceVariant)),
-              ),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isSel
+                        ? scheme.primary.withValues(alpha: 0.16)
+                        : scheme.surfaceContainerHighest
+                            .withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(
+                        color: isSel
+                            ? scheme.primary.withValues(alpha: 0.55)
+                            : scheme.outlineVariant.withValues(alpha: 0.4)),
+                  ),
+                  child:
+                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1),
+                      child: Icon(
+                          multi
+                              ? (isSel
+                                  ? Icons.check_box
+                                  : Icons.check_box_outline_blank)
+                              : (isSel
+                                  ? Icons.radio_button_checked
+                                  : Icons.radio_button_unchecked),
+                          size: 13,
+                          color: isSel
+                              ? scheme.primary
+                              : scheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(label,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                    fontWeight:
+                                        isSel ? FontWeight.w600 : null)),
+                            if (desc.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 1),
+                                child: Text(desc,
+                                    style: theme.textTheme.labelSmall
+                                        ?.copyWith(
+                                            color:
+                                                scheme.onSurfaceVariant)),
+                              ),
+                          ]),
+                    ),
+                  ]),
+                ),
+              );
+            }),
+          if (multi)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('（可多选）',
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: scheme.onSurfaceVariant)),
+            ),
         ],
         const SizedBox(height: 6),
         TextField(
