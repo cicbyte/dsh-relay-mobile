@@ -113,36 +113,30 @@ class InteractionCenter {
 
   /// 应答：`outcome.result.value`。询问传 `{answers:[{id,selected,custom?}]}`，
   /// 授权传结果字符串（'allowed-once' / 'rejected'）。
+  ///
+  /// 重要：本地待答卡**不预摘**，等服务端 settle 后广播的 `cancel` 帧再移除。
+  /// 网关对不匹配的应答是静默 no-op（照样回 ok）——预摘会让卡片"闪没又
+  /// 蹦回来"，看起来像提交不生效的死循环。
   Future<void> answer(String eventId, Object? value) async {
-    await _submit(eventId, {'kind': 'result', 'value': value});
+    await _send(eventId, {'kind': 'result', 'value': value});
   }
 
-  /// 放弃应答，转交下一个 waterfall 监听者（如网页端）。
+  /// 放弃应答，转交下一个 waterfall 监听者（如网页端）。本地即刻收起卡片。
   Future<void> pass(String eventId) async {
-    await _submit(eventId, {'kind': 'next'});
+    await _send(eventId, {'kind': 'next'});
+    if (_byId.remove(eventId) != null) _notify();
   }
 
-  Future<void> _submit(String eventId, Map<String, dynamic> outcome) async {
+  Future<void> _send(String eventId, Map<String, dynamic> outcome) async {
     final client = _client;
     final cid = _clientId;
     if (client == null || cid == null) {
       throw DshRpcException('events/not-connected', '事件通道未就绪');
     }
-    // 先本地消掉卡片，再上行（失败再挂回，避免重复应答同一 eventId）。
-    final removed = _byId.remove(eventId);
-    _notify();
-    try {
-      await client.rpc(r'$events/result', {
-        'clientId': cid,
-        'eventId': eventId,
-        'outcome': outcome,
-      });
-    } catch (_) {
-      if (removed != null && !_byId.containsKey(eventId)) {
-        _byId[eventId] = removed;
-        _notify();
-      }
-      rethrow;
-    }
+    await client.rpc(r'$events/result', {
+      'clientId': cid,
+      'eventId': eventId,
+      'outcome': outcome,
+    });
   }
 }
