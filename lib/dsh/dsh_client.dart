@@ -70,7 +70,7 @@ class DshClient {
     final resp = await transport.request(
       'POST',
       '/api/$endpoint',
-      headers: {'content-type': 'application/json', ..._authHeaders},
+      headers: {'content-type': 'application/json; charset=utf-8', ..._authHeaders},
       body: body,
     );
     if (resp.body.isEmpty) {

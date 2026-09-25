@@ -59,7 +59,10 @@ class DirectTransport extends DshTransport {
     try {
       final req = await client.openUrl(method, _path(path));
       headers.forEach(req.headers.set);
-      if (body != null) req.write(body);
+      // 用 UTF-8 字节写入：req.write(String) 默认 latin1 编码，请求体含
+      // 中文时抛 "Invalid argument (string): Contains invalid characters."
+      // （_UnicodeSubsetEncoder）。JSON 本就是 UTF-8，按字节直写最稳。
+      if (body != null) req.add(utf8.encode(body));
       final resp = await req.close();
       final text = await resp.transform(utf8.decoder).join();
       return TransportResponse(
