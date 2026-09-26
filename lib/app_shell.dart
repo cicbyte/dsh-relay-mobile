@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'dsh/conn_store.dart';
 import 'dsh/dsh_client.dart';
 import 'dsh/transport.dart';
 import 'pages/connect_page.dart';
@@ -23,6 +24,46 @@ class _AppRootState extends State<AppRoot> {
   List<SessionSummary> _sessions = [];
   SessionSummary? _selected;
   bool _sessionsLoading = false;
+  bool _sessionRestored = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoConnect();
+  }
+
+  /// 启动自动重连：用上次成功的连接配置直接连（持久化，免每次手配）。
+  /// 自动重连失败不打扰用户（桌面未启动/adb reverse 未建立等），
+  /// 停在空态，连接设置页手动连接照常可用。
+  Future<void> _autoConnect() async {
+    // 有存档用存档；首次启动用默认直连配置直接试连（失败静默，零配置即用）。
+    final c = await ConnStore.loadConfig() ?? const ConnConfig();
+    if (c == null || !mounted) return;
+    try {
+      final DshTransport transport;
+      final String modeLabel;
+      if (c.mode == 0) {
+        final raw = c.url.replaceFirst(RegExp(r'/+$'), '');
+        transport = DirectTransport(Uri.parse(raw));
+        modeLabel = '直连 · $raw';
+      } else {
+        final relay = RelayTransport(Uri.parse(c.relay), code: c.code);
+        await relay.connect();
+        transport = relay;
+        modeLabel = '云端转发 · ${c.relay}';
+      }
+      final client = DshClient(transport);
+      await client.sessionList(); // 连通性自检
+      if (!mounted) {
+        transport.close();
+        return;
+      }
+      await _onConnected(transport: transport, client: client, modeLabel: modeLabel);
+      debugPrint('[autoConnect] ok $modeLabel');
+    } catch (e) {
+      debugPrint('[autoConnect] fail: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -60,6 +101,23 @@ class _AppRootState extends State<AppRoot> {
       items.sort((a, b) => (b.updatedAt ?? 0).compareTo(a.updatedAt ?? 0));
       if (!mounted) return;
       setState(() => _sessions = items);
+      // 首次拿到会话列表后：自动打开上次的会话（只尝试一次）。
+      if (!_sessionRestored) {
+        _sessionRestored = true;
+        final last = await ConnStore.lastSessionId();
+        debugPrint('[restore] items=${items.length} '
+            'ids=${items.map((e) => e.sessionId).take(3).toList()} '
+            'last=$last selected=${_selected?.sessionId} mounted=$mounted');
+        if (last != null && mounted && _selected == null) {
+          for (final it in items) {
+            if (it.sessionId == last) {
+              debugPrint('[restore] match -> open ${it.title}');
+              selectSession(it);
+              break;
+            }
+          }
+        }
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('刷新会话失败：$e')));
@@ -73,6 +131,8 @@ class _AppRootState extends State<AppRoot> {
     setState(() => _selected = s);
     tabIndex.value = 0;
     rootScaffoldKey.currentState?.closeDrawer();
+    // 记住上次会话：下次启动自动打开。
+    ConnStore.saveLastSessionId(s.sessionId);
   }
 
   Future<void> createSession() async {

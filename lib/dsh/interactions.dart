@@ -114,11 +114,14 @@ class InteractionCenter {
   /// 应答：`outcome.result.value`。询问传 `{answers:[{id,selected,custom?}]}`，
   /// 授权传结果字符串（'allowed-once' / 'rejected'）。
   ///
-  /// 重要：本地待答卡**不预摘**，等服务端 settle 后广播的 `cancel` 帧再移除。
-  /// 网关对不匹配的应答是静默 no-op（照样回 ok）——预摘会让卡片"闪没又
-  /// 蹦回来"，看起来像提交不生效的死循环。
+  /// 本地收起时机：RPC 成功返回后即摘卡。注意网关
+  /// `receiveRemoteEventResult` 会先把应答者从 `pending.deliveries` 摘掉再
+  /// 广播 `cancel`——**cancel 到不了应答者自己**，等 cancel 摘卡会永远等
+  /// 不到（实测"答完问答卡不消失"）。RPC 抛错时卡片保留可重试。
+  /// 其他来源的取消（网页端先答、主动撤回）仍由 cancel 帧兜底摘除。
   Future<void> answer(String eventId, Object? value) async {
     await _send(eventId, {'kind': 'result', 'value': value});
+    if (_byId.remove(eventId) != null) _notify();
   }
 
   /// 放弃应答，转交下一个 waterfall 监听者（如网页端）。本地即刻收起卡片。

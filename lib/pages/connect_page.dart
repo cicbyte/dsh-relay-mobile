@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../dsh/conn_store.dart';
 import '../dsh/dsh_client.dart';
 import '../dsh/transport.dart';
 
@@ -32,6 +33,21 @@ class _ConnectPageState extends State<ConnectPage> {
   final _tokenCtrl = TextEditingController();
   final _relayCtrl = TextEditingController(text: 'ws://127.0.0.1:8787');
   final _codeCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // 回填上次的连接配置（持久化，免每次手配）。
+    ConnStore.loadConfig().then((c) {
+      if (c == null || !mounted) return;
+      setState(() {
+        _mode = c.mode;
+        _urlCtrl.text = c.url;
+        _relayCtrl.text = c.relay;
+        _codeCtrl.text = c.code;
+      });
+    });
+  }
 
   @override
   void dispose() {
@@ -72,6 +88,13 @@ class _ConnectPageState extends State<ConnectPage> {
       final token = _tokenCtrl.text.trim();
       if (token.isNotEmpty) await client.authorize(token);
       await client.sessionList(); // 连通性自检
+      // 连接成功即持久化（launch token 不存——短时效）。
+      await ConnStore.saveConfig(ConnConfig(
+        mode: _mode,
+        url: _urlCtrl.text.trim().replaceFirst(RegExp(r'/+$'), ''),
+        relay: _relayCtrl.text.trim(),
+        code: _codeCtrl.text.trim(),
+      ));
       await widget.onConnected(transport: transport, client: client, modeLabel: modeLabel);
     } catch (e) {
       setState(() => _error = '$e');

@@ -40,6 +40,8 @@ dependencies:
   flutter_markdown_plus: ^1.0.12
   # Markdown 解析器（flutter_markdown_plus 的扩展集类型来源，显式声明）
   markdown: ^7.3.0
+  # 连接配置 / 上次会话持久化（启动自动重连、自动恢复会话）
+  shared_preferences: ^2.3.0
 
 dev_dependencies:
   flutter_test:
