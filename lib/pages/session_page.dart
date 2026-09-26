@@ -1166,6 +1166,12 @@ class _ToolCallCardState extends State<_ToolCallCard> {
       final questions = _parseMapList(e.arguments, 'questions');
       if (questions.isNotEmpty) return _questionCard(context, e, questions);
     }
+    // 计划工具：参数是完整计划 Markdown，按计划卡渲染（对齐 web presentCall：
+    // 标题=计划首个 # 标题，正文=计划全文）。
+    if (e.name == 'exit_plan_mode') {
+      final plan = _parseArgString(e.arguments, 'plan');
+      if (plan.trim().isNotEmpty) return _planCard(context, e, plan.trim());
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1259,6 +1265,108 @@ class _ToolCallCardState extends State<_ToolCallCard> {
     }
   }
 
+  /// 从工具参数 JSON 里安全取出字符串字段（解析失败返回空 → 走通用卡兜底）。
+  String _parseArgString(String json, String key) {
+    try {
+      final j = jsonDecode(json);
+      final v = j is Map ? j[key] : null;
+      return v is String ? v : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// exit_plan_mode 计划卡：标题=计划首个 # 标题，正文=计划 Markdown。
+  Widget _planCard(BuildContext context, _ToolEntry e, String plan) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final title = _firstHeading(plan) ?? '计划';
+    final done = e.hasResult;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: (e.isError
+                      ? scheme.error
+                      : done
+                          ? Colors.greenAccent
+                          : Colors.lightBlueAccent)
+                  .withValues(alpha: 0.45)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.map_outlined, size: 14, color: Colors.lightBlueAccent),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(title,
+                  style: theme.textTheme.labelMedium
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+            ),
+            if (!done)
+              SizedBox(
+                  width: 12,
+                  height: 12,
+                  child:
+                      CircularProgressIndicator(strokeWidth: 1.8, color: scheme.primary))
+            else
+              Icon(e.isError ? Icons.close : Icons.check,
+                  size: 14,
+                  color: e.isError ? scheme.error : Colors.greenAccent),
+            if (e.durationMs != null) ...[
+              const SizedBox(width: 6),
+              Text(_fmtDuration(e.durationMs!),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7))),
+            ],
+          ]),
+          const SizedBox(height: 8),
+          MarkdownText(plan),
+          if (done) ...[
+            const SizedBox(height: 8),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(e.isError ? Icons.close : Icons.check_circle,
+                    size: 12, color: e.isError ? scheme.error : Colors.greenAccent),
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  e.isError
+                      ? e.resultText
+                      : (e.resultText.contains('approved')
+                          ? '计划已批准 · 退出计划模式，开始执行'
+                          : e.resultText),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                      color: e.isError ? scheme.error : Colors.greenAccent),
+                ),
+              ),
+            ]),
+          ] else ...[
+            const SizedBox(height: 8),
+            Text('等待评审…',
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(color: scheme.onSurfaceVariant)),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  /// 计划的首个 Markdown 标题（对齐 web 的 firstHeading）。
+  String? _firstHeading(String plan) {
+    for (final line in plan.split('\n')) {
+      final m = RegExp(r'^#{1,6}\s+(.+?)\s*$').firstMatch(line);
+      if (m != null) return m.group(1);
+    }
+    return null;
+  }
+
   /// ask_user_question 问题卡：问题/选项/多选标注 + 回答展示。
   Widget _questionCard(
       BuildContext context, _ToolEntry e, List<Map<String, dynamic>> questions) {
@@ -1326,6 +1434,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
     final scheme = theme.colorScheme;
     final header = '${q['header'] ?? ''}'.trim();
     final question = '${q['question'] ?? ''}'.trim();
+    final detail = '${q['detail'] ?? ''}'.trim();
     final multi = q['multi_select'] == true;
     final options = (q['options'] as List? ?? []).whereType<Map>().toList();
     final selected =
@@ -1334,12 +1443,28 @@ class _ToolCallCardState extends State<_ToolCallCard> {
     final answered = answer != null;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (header.isNotEmpty)
-        Text(header,
+        Text(questionLabel(q, header),
             style: theme.textTheme.labelSmall
                 ?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600)),
       if (question.isNotEmpty) ...[
         if (header.isNotEmpty) const SizedBox(height: 2),
         Text(question, style: theme.textTheme.bodyMedium),
+      ],
+      // 携带正文的询问（如计划评审的 detail=完整计划）：正文按 Markdown
+      // 全量渲染，不再丢细节。
+      if (detail.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(8),
+            border:
+                Border.all(color: scheme.outlineVariant.withValues(alpha: 0.4)),
+          ),
+          child: MarkdownText(detail),
+        ),
       ],
       if (options.isNotEmpty) ...[
         const SizedBox(height: 6),
@@ -1382,7 +1507,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(label,
+                        Text(questionLabel(q, label),
                             style: theme.textTheme.bodySmall?.copyWith(
                                 fontWeight:
                                     isSel ? FontWeight.w600 : null)),
@@ -1434,7 +1559,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
               ),
               const SizedBox(width: 6),
               Expanded(
-                child: Text('${o['label']}',
+                child: Text(questionLabel(q, '${o['label']}'),
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: Colors.greenAccent)),
               ),

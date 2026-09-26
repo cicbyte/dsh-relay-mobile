@@ -1,6 +1,32 @@
 import 'package:flutter/material.dart';
 
 import '../dsh/interactions.dart';
+import 'markdown_text.dart';
+
+/// 询问文案的中文显示映射（仅显示层翻译，提交值保持原 label）。
+/// 计划评审（intent.kind == 'plan-review'）的固定英文案 → 中文。
+String questionLabel(Map q, String text) {
+  final intent = (q['intent'] as Map?)?['kind'];
+  if (intent == 'plan-review') {
+    switch (text) {
+      case 'Approve':
+        return '批准计划';
+      case 'Keep planning':
+        return '继续规划';
+      case 'Plan review':
+        return '计划评审';
+    }
+  }
+  return text;
+}
+
+/// 计划评审询问的自由填提示（其他询问用默认）。
+String questionCustomHint(Map q) {
+  final intent = (q['intent'] as Map?)?['kind'];
+  return intent == 'plan-review'
+      ? '反馈意见（可选）：选「继续规划」时发给模型调整计划'
+      : '补充说明（可选）';
+}
 
 /// 待答交互的作答区（替代消息输入框）：询问 = 选项点选 + 自由填 + 提交；
 /// 授权 = 允许一次 / 拒绝。协议应答经 [onAnswer]/[onPass] 上行。
@@ -269,11 +295,26 @@ class _InteractionComposerState extends State<InteractionComposer> {
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (header.isNotEmpty)
-          Text(header,
+          Text(questionLabel(q, header),
               style: theme.textTheme.labelSmall?.copyWith(color: scheme.primary)),
         Text('${q['question'] ?? ''}',
             style: theme.textTheme.bodyMedium
                 ?.copyWith(fontWeight: FontWeight.w500)),
+        // 携带正文的询问（如计划评审的 detail=完整计划）：正文全量渲染。
+        if ('${q['detail'] ?? ''}'.trim().isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.4)),
+            ),
+            child: MarkdownText('${q['detail']}'.trim()),
+          ),
+        ],
         if (options.isNotEmpty) ...[
           const SizedBox(height: 6),
           // 选项一列一行：标签 + 描述常显，整行可点选/取消。
@@ -324,7 +365,7 @@ class _InteractionComposerState extends State<InteractionComposer> {
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(label,
+                            Text(questionLabel(q, label),
                                 style: theme.textTheme.bodySmall?.copyWith(
                                     fontWeight:
                                         isSel ? FontWeight.w600 : null)),
@@ -359,7 +400,9 @@ class _InteractionComposerState extends State<InteractionComposer> {
           enabled: !d.skipped,
           onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
-            hintText: options.isEmpty ? '输入回答…' : '或填写自定义回答…',
+            hintText: (q['intent'] as Map?)?['kind'] == 'plan-review'
+                ? questionCustomHint(q)
+                : (options.isEmpty ? '输入回答…' : '或填写自定义回答…'),
             isDense: true,
             border: const OutlineInputBorder(),
           ),
