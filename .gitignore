@@ -7,4 +7,4 @@ build/
 .dart_tool/
 *.iml
 relay/relay-server/target/
-relay/node_modules/
+relay/node_modules/android/.kotlin/
