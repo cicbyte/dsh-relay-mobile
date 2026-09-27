@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 
 import 'package:flutter/material.dart';
 
@@ -56,10 +57,41 @@ class _SessionPageState extends State<SessionPage> {
   int _planSeq = -1;
   bool _planActive = false;
 
+  // ---- composer 配件状态（对齐桌面输入区，均按 seq 只认最新事件） ----
+  /// 待发附件：{name, bytes, isImage, receiptId?, uploading?}。
+  final List<Map<String, dynamic>> _draftFiles = [];
+  String _permissionPreset = '';
+  int _permissionSeq = -1;
+  String _modelLabel = '';
+  String _modelName = '';
+  int _modelSeq = -1;
+  String _goalObjective = '';
+  int _goalSeq = -1;
+
   void _absorbPlan(WireRecord rec) {
-    if (rec.type != 'plan/mode' || rec.seq <= _planSeq) return;
-    _planSeq = rec.seq;
-    _planActive = rec.data['active'] == true;
+    switch (rec.type) {
+      case 'plan/mode':
+        if (rec.seq <= _planSeq) return;
+        _planSeq = rec.seq;
+        _planActive = rec.data['active'] == true;
+      case 'permission/preset':
+        if (rec.seq <= _permissionSeq) return;
+        _permissionSeq = rec.seq;
+        _permissionPreset = '${rec.data['preset'] ?? ''}';
+      case 'model/selection':
+        if (rec.seq <= _modelSeq) return;
+        _modelSeq = rec.seq;
+        _modelLabel =
+            '${rec.data['model'] ?? rec.data['modelId'] ?? rec.data['name'] ?? ''}';
+        _modelName = '${rec.data['model'] ?? rec.data['modelId'] ?? ''}';
+      case 'goal/change':
+        if (rec.seq <= _goalSeq) return;
+        _goalSeq = rec.seq;
+        final goal = Map<String, dynamic>.from(rec.data['goal'] as Map? ?? {});
+        _goalObjective = rec.data['operation'] == 'clear'
+            ? ''
+            : '${goal['objective'] ?? ''}';
+    }
   }
 
   /// 「深度求索中…」秒级刷新用。
@@ -252,11 +284,17 @@ class _SessionPageState extends State<SessionPage> {
 
   Future<void> _send() async {
     final text = _inputCtrl.text.trim();
-    if (text.isEmpty || _sending) return;
+    // 纯附件（空文本）也允许发送——对齐桌面 sink 语义。
+    if ((text.isEmpty && _draftFiles.isEmpty) || _sending) return;
     // `/` 开头走命令通道（对齐 web 输入层）：commands/execute 而非
     // session/prompt。未知命令（如粘贴的 /path/... 路径）回落普通消息。
     if (text.startsWith('/')) {
       await _runCommand(text);
+      return;
+    }
+    // 带附件发送走 content 块数组通道（对齐桌面 serializeAttachments）。
+    if (_draftFiles.isNotEmpty) {
+      await _sendWithFiles(text);
       return;
     }
     setState(() => _sending = true);
@@ -354,6 +392,346 @@ class _SessionPageState extends State<SessionPage> {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('命令失败：$e')));
       }
+    }
+  }
+
+  // ================= composer 配件（对齐桌面输入区） =================
+
+  /// 占位文案随状态切换（桌面 placeholder.plan/default 同语义）。
+  String _placeholderText() {
+    if (_planActive) return '描述你的任务以生成计划';
+    return '输入消息…  / 调用指令，+ 添加附件';
+  }
+
+  String _imageMime(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    return 'image/jpeg';
+  }
+
+  /// 执行斜杠命令并 toast 结果（不接管输入框；计划/权限开关用）。
+  Future<String> _execCommand(String line) async {
+    final v = await widget.client.rpc('commands/execute', {
+      'agentId': widget.summary.sessionId,
+      'line': line,
+      'submittedAttachments': <dynamic>[],
+    });
+    final result = Map<String, dynamic>.from(v['result'] as Map? ?? {});
+    return '${result['text'] ?? ''}';
+  }
+
+  /// 附件条：待发文件 chips（图片/文件图标 + 删除）。
+  Widget _attachmentStrip() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: [
+          for (final f in _draftFiles)
+            InputChip(
+              avatar: Icon(
+                f['uploading'] == true
+                    ? Icons.cloud_upload_outlined
+                    : f['isImage'] == true
+                        ? Icons.image_outlined
+                        : Icons.insert_drive_file_outlined,
+                size: 18,
+              ),
+              label: Text('${f['name']}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              deleteIcon: const Icon(Icons.close, size: 16),
+              onDeleted: () => setState(() => _draftFiles.remove(f)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 目标条（桌面 GoalBar 的移动对应）。
+  Widget _goalDock() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(children: [
+        const Icon(Icons.flag_outlined, size: 14, color: Colors.pinkAccent),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(_goalObjective,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall),
+        ),
+      ]),
+    );
+  }
+
+  /// 权限预设 chip（桌面 PermissionSelect，下发 /permission <preset>）。
+  Widget _accessChip() {
+    final label = switch (_permissionPreset) {
+      'read-only' => '仅可查看',
+      'workspace-write' => '工作区内修改',
+      'danger-full-access' => '完全权限',
+      '' => '权限',
+      _ => _permissionPreset,
+    };
+    return ActionChip(
+      avatar: const Icon(Icons.admin_panel_settings_outlined, size: 16),
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      onPressed: _pickPermission,
+    );
+  }
+
+  /// 计划模式 chip（桌面 conversation.input.plan 座）。
+  Widget _planChip() {
+    return ActionChip(
+      avatar: Icon(Icons.map_outlined,
+          size: 16, color: _planActive ? Colors.lightBlueAccent : null),
+      label: Text(_planActive ? '计划中' : '计划',
+          style: const TextStyle(fontSize: 12)),
+      onPressed: _togglePlan,
+    );
+  }
+
+  /// 模型 chip（桌面 ModelSelect 座）。
+  Widget _modelChip() {
+    return ActionChip(
+      avatar: const Icon(Icons.tune, size: 16),
+      label: Text(
+        _modelLabel.isEmpty ? '模型' : _modelLabel,
+        style: const TextStyle(fontSize: 12),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      onPressed: _pickModel,
+    );
+  }
+
+  /// 选附件：图片留 base64 直传；其他文件即刻上传拿 receiptId。
+  Future<void> _pickFiles() async {
+    final result =
+        await FilePicker.platform.pickFiles(allowMultiple: true, withData: true);
+    if (result == null) return;
+    for (final f in result.files) {
+      final bytes = f.bytes;
+      if (bytes == null) continue;
+      final name = f.name;
+      final lower = name.toLowerCase();
+      final isImage = lower.endsWith('.png') ||
+          lower.endsWith('.jpg') ||
+          lower.endsWith('.jpeg') ||
+          lower.endsWith('.webp') ||
+          lower.endsWith('.gif');
+      if (isImage) {
+        setState(() =>
+            _draftFiles.add({'name': name, 'bytes': bytes, 'isImage': true}));
+      } else {
+        setState(() => _draftFiles
+            .add({'name': name, 'bytes': bytes, 'isImage': false, 'uploading': true}));
+        try {
+          final v = await widget.client
+              .uploadFile(widget.summary.sessionId, name, bytes);
+          if (!mounted) return;
+          setState(() {
+            for (final e in _draftFiles) {
+              if (identical(e['bytes'], bytes)) {
+                e['receiptId'] = v['receiptId'];
+                e['uploading'] = false;
+              }
+            }
+          });
+        } catch (e) {
+          if (!mounted) return;
+          setState(() => _draftFiles.removeWhere((e) => identical(e['bytes'], bytes)));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('上传失败：$name')));
+        }
+      }
+    }
+  }
+
+  /// 权限预设选择（完全权限沿用桌面确认文案）。
+  Future<void> _pickPermission() async {
+    const options = [
+      ('read-only', '仅可查看', Icons.visibility_outlined),
+      ('workspace-write', '工作区内修改', Icons.edit_outlined),
+      ('danger-full-access', '完全权限', Icons.gpp_maybe_outlined),
+    ];
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const ListTile(
+              title: Text('权限预设', style: TextStyle(fontWeight: FontWeight.bold))),
+          for (final (id, label, icon) in options)
+            ListTile(
+              leading: Icon(icon),
+              title: Text(label),
+              trailing: _permissionPreset == id
+                  ? const Icon(Icons.check, size: 18)
+                  : null,
+              onTap: () => Navigator.of(ctx).pop(id),
+            ),
+        ]),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    if (picked == 'danger-full-access') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('确认启用完全权限？'),
+          content: const Text(
+              '启用完全权限后，智能体将减少确认步骤，并且可以直接执行更多操作，包括敏感操作、文件修改或外部命令。仅建议在你信任当前任务时使用。'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('启用完全权限')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    try {
+      final text = await _execCommand('/permission $picked');
+      if (mounted && text.isNotEmpty) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(text)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('命令失败：$e')));
+      }
+    }
+  }
+
+  /// 模型选择（session/modelCatalog → session/selectModel）。
+  Future<void> _pickModel() async {
+    try {
+      final v = await widget.client.modelCatalog();
+      final groups = (v['groups'] as List? ?? []).whereType<Map>().toList();
+      if (!mounted) return;
+      showModalBottomSheet(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                  title: Text('选择模型',
+                      style: TextStyle(fontWeight: FontWeight.bold))),
+              for (final g in groups) ...[
+                ListTile(
+                  dense: true,
+                  title: Text('${g['name'] ?? g['id'] ?? ''}',
+                      style: TextStyle(
+                          color: Theme.of(ctx).colorScheme.primary,
+                          fontSize: 13)),
+                ),
+                for (final m in (g['models'] as List? ?? []).whereType<Map>())
+                  ListTile(
+                    leading: Icon(
+                      _modelName == '${m['id']}'
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      size: 18,
+                    ),
+                    title: Text('${m['name'] ?? m['id'] ?? ''}'),
+                    subtitle: m['description'] == null
+                        ? null
+                        : Text('${m['description']}',
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      _setModel('${g['id'] ?? ''}', '${m['id'] ?? ''}');
+                    },
+                  ),
+              ],
+            ],
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('模型目录加载失败：$e')));
+      }
+    }
+  }
+
+  Future<void> _setModel(String provider, String model) async {
+    try {
+      await widget.client.selectModel(widget.summary.sessionId, provider, model);
+      if (!mounted) return;
+      setState(() {
+        _modelName = model;
+        _modelLabel = model;
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('已切换模型 · $model')));
+      widget.onSessionEnded?.call();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('切换模型失败：$e')));
+      }
+    }
+  }
+
+  /// 带附件发送：content = [text?] + [image|file] 块数组。
+  Future<void> _sendWithFiles(String text) async {
+    if (widget.summary.parentSessionId != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('子agent 暂不支持附件发送')));
+      }
+      return;
+    }
+    if (_draftFiles.any((f) => f['uploading'] == true)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('附件上传中，请稍候发送')));
+      }
+      return;
+    }
+    setState(() => _sending = true);
+    try {
+      final tz = await deviceTimeZoneId();
+      final content = <Map<String, dynamic>>[
+        if (text.isNotEmpty) {'type': 'text', 'text': text},
+        for (final f in _draftFiles)
+          if (f['isImage'] == true)
+            {
+              'type': 'image',
+              'mediaType': _imageMime('${f['name']}'),
+              'data': base64Encode(f['bytes'] as List<int>),
+              'name': f['name'],
+            }
+          else
+            {
+              'type': 'file',
+              'receiptId': f['receiptId'],
+              'name': f['name'],
+            },
+      ];
+      await widget.client.sessionPromptBlocks(widget.summary.sessionId, content,
+          clientTimeZone: tz);
+      if (!mounted) return;
+      setState(() => _draftFiles.clear());
+      _inputCtrl.clear();
+      widget.onSessionEnded?.call();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('发送失败：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -1308,28 +1686,53 @@ class _SessionPageState extends State<SessionPage> {
               return SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
-                  child: Row(children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _inputCtrl,
-                        minLines: 1,
-                        maxLines: 5,
-                        decoration: const InputDecoration(
-                          hintText: '输入消息…',
-                          border: OutlineInputBorder(),
-                          isDense: true,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 附件条（选中待发，对齐桌面 conversation.input.attachments）
+                      if (_draftFiles.isNotEmpty) _attachmentStrip(),
+                      // 目标条（对齐桌面 GoalBar dock）
+                      if (_goalObjective.isNotEmpty) _goalDock(),
+                      // 输入行：[+]附件 | 输入框 | 发送
+                      Row(children: [
+                        IconButton(
+                          onPressed: _sending ? null : _pickFiles,
+                          tooltip: '附件',
+                          icon: const Icon(Icons.add_circle_outline),
                         ),
-                        onSubmitted: (_) => _send(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      onPressed: _sending ? null : _send,
-                      icon: _sending
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.send),
-                    ),
-                  ]),
+                        Expanded(
+                          child: TextField(
+                            controller: _inputCtrl,
+                            minLines: 1,
+                            maxLines: 5,
+                            decoration: InputDecoration(
+                              hintText: _placeholderText(),
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            onSubmitted: (_) => _send(),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton.filled(
+                          onPressed: _sending ? null : _send,
+                          icon: _sending
+                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.send),
+                        ),
+                      ]),
+                      const SizedBox(height: 6),
+                      // 配件行（对齐桌面 accessSelect / input.plan / input.model 三座）
+                      Row(children: [
+                        _accessChip(),
+                        const SizedBox(width: 6),
+                        _planChip(),
+                        const SizedBox(width: 6),
+                        Expanded(child: _modelChip()),
+                      ]),
+                    ],
+                  ),
                 ),
               );
             },

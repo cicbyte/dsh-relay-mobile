@@ -38,7 +38,7 @@ class _AppRootState extends State<AppRoot> {
   Future<void> _autoConnect() async {
     // 有存档用存档；首次启动用默认直连配置直接试连（失败静默，零配置即用）。
     final c = await ConnStore.loadConfig() ?? const ConnConfig();
-    if (c == null || !mounted) return;
+    if (!mounted) return;
     try {
       final DshTransport transport;
       final String modeLabel;

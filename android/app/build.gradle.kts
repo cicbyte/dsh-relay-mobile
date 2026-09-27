@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "com.cicbyte.dsh_mobile"
-    compileSdk = flutter.compileSdkVersion
+    // file_picker 依赖 flutter_plugin_android_lifecycle 要求 compileSdk >= 36
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -47,3 +48,4 @@ kotlin {
 flutter {
     source = "../.."
 }
+

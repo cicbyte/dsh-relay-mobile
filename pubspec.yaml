@@ -42,6 +42,7 @@ dependencies:
   markdown: ^7.3.0
   # 连接配置 / 上次会话持久化（启动自动重连、自动恢复会话）
   shared_preferences: ^2.3.0
+  file_picker: ^8.0.0
 
 dev_dependencies:
   flutter_test:
@@ -95,3 +96,7 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+dependency_overrides:
+  flutter_plugin_android_lifecycle: 2.0.27
+

@@ -131,6 +131,53 @@ class DshClient {
       rpc('subagents/list', {'parentSessionId': parentSessionId});
 
   /// subagents/prompt：向 continuable 子代理发消息（one-shot 不可发）。
+  /// 带附件发消息：content = [text?|image|file] 块数组（对齐桌面 serializeAttachments）。
+  /// 图片块 {type:image, mediaType, data(base64), name?}；
+  /// 文件块 {type:file, receiptId, name?}（先 fileUploads/upload 拿收据）。
+  Future<void> sessionPromptBlocks(
+    String sessionId,
+    List<Map<String, dynamic>> content, {
+    String mode = 'queue',
+    String? clientTimeZone,
+  }) async {
+    await rpc('session/prompt', {
+      'request': {
+        'requestId': _uuid(),
+        'sessionId': sessionId,
+        'mode': mode,
+        'content': content,
+        if (clientTimeZone != null) 'clientTimeZone': clientTimeZone,
+      },
+    });
+  }
+
+  /// 上传附件 → {receiptId, file:{attachmentId,name,bytes}}（data=base64；
+  /// args 为 agentId + request 包裹，与 commands/execute 同族）。
+  Future<Map<String, dynamic>> uploadFile(
+          String sessionId, String name, List<int> bytes) =>
+      rpc('fileUploads/upload', {
+        'agentId': sessionId,
+        'request': {'data': base64Encode(bytes), 'name': name},
+      });
+
+  /// 模型目录：{default,routableProviders,groups:[{id,name,models:[...]}],failures}。
+  Future<Map<String, dynamic>> modelCatalog() => rpc('session/modelCatalog', {});
+
+  /// 切换模型（对齐桌面 ModelSelect → session/selectModel；args 为 request 包裹）。
+  Future<Map<String, dynamic>> selectModel(
+          String sessionId, String provider, String model) =>
+      rpc('session/selectModel', {
+        'request': {
+          'sessionId': sessionId,
+          'provider': provider,
+          'model': model,
+        }
+      });
+
+  /// 会话投影（session/control）：queues/inbox/model/goal/title/todos 等。
+  Future<Map<String, dynamic>> sessionControl(String sessionId) =>
+      rpc('session/control', {'sessionId': sessionId});
+
   Future<void> subagentPrompt({
     required String parentSessionId,
     required String childSessionId,
