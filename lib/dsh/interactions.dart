@@ -130,6 +130,21 @@ class InteractionCenter {
     if (_byId.remove(eventId) != null) _notify();
   }
 
+  /// 「去聊天里说」：以 UserQuestionError(ASK_CANCELLED) 拒绝本次询问
+  /// （对齐 web `pending.cancel()`）——工具侧收到 "The user dismissed the
+  /// plan review to speak instead"，用户转到输入框继续说。本地即刻收起。
+  Future<void> dismiss(String eventId) async {
+    await _send(eventId, {
+      'kind': 'rejected',
+      'error': {
+        'name': 'UserQuestionError',
+        'message': 'the user cancelled ask_user_question',
+        'code': 'ASK_CANCELLED',
+      },
+    });
+    if (_byId.remove(eventId) != null) _notify();
+  }
+
   Future<void> _send(String eventId, Map<String, dynamic> outcome) async {
     final client = _client;
     final cid = _clientId;

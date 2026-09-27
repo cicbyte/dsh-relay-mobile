@@ -4,42 +4,78 @@ import '../dsh/interactions.dart';
 import 'markdown_text.dart';
 
 /// 询问文案的中文显示映射（仅显示层翻译，提交值保持原 label）。
-/// 计划评审（intent.kind == 'plan-review'）的固定英文案 → 中文。
+/// 文案对齐桌面端 dsh-client-ui-user-questions 的 zh 文案表。
 String questionLabel(Map q, String text) {
   final intent = (q['intent'] as Map?)?['kind'];
   if (intent == 'plan-review') {
     switch (text) {
       case 'Approve':
-        return '批准计划';
+        return '确认执行';
       case 'Keep planning':
-        return '继续规划';
+        return '拒绝';
       case 'Plan review':
-        return '计划评审';
+        return '计划待审';
     }
   }
   return text;
 }
 
-/// 计划评审询问的自由填提示（其他询问用默认）。
+/// 计划评审询问的自由填提示（决策卡无自由填，仅通用流兜底时用）。
 String questionCustomHint(Map q) {
   final intent = (q['intent'] as Map?)?['kind'];
-  return intent == 'plan-review'
-      ? '反馈意见（可选）：选「继续规划」时发给模型调整计划'
-      : '补充说明（可选）';
+  return intent == 'plan-review' ? '反馈意见（可选）' : '补充说明（可选）';
+}
+
+/// 计划评审收窄判定（对齐 web `planReviewOf`）：单题、intent.plan-review、
+/// 带 detail、非多选、≤2 选项、intent.approve 命中其一。命中则走决策卡，
+/// 否则退回通用问答流。
+Map<String, dynamic>? planReviewOf(List<Map<String, dynamic>> questions) {
+  if (questions.length != 1) return null;
+  final q = questions[0];
+  final intent = q['intent'];
+  if (intent is! Map || intent['kind'] != 'plan-review') return null;
+  final plan = '${q['detail'] ?? ''}';
+  if (plan.trim().isEmpty) return null;
+  if (q['multiSelect'] == true) return null;
+  final options = (q['options'] as List? ?? []).whereType<Map>().toList();
+  if (options.length > 2) return null;
+  final approveLabel = '${intent['approve'] ?? ''}';
+  Map? approve;
+  Map? decline;
+  for (final o in options) {
+    if ('${o['label']}' == approveLabel) {
+      approve = o;
+    } else {
+      decline = o;
+    }
+  }
+  if (approve == null) return null;
+  return {
+    'id': '${q['id']}',
+    'question': '${q['question'] ?? ''}',
+    'plan': plan,
+    'approveLabel': '${approve['label']}',
+    'approveDesc': '${approve['description'] ?? ''}',
+    if (decline != null) 'declineLabel': '${decline['label']}',
+    if (decline != null) 'declineDesc': '${decline['description'] ?? ''}',
+  };
 }
 
 /// 待答交互的作答区（替代消息输入框）：询问 = 选项点选 + 自由填 + 提交；
-/// 授权 = 允许一次 / 拒绝。协议应答经 [onAnswer]/[onPass] 上行。
+/// 授权 = 允许一次 / 拒绝；计划评审 = 决策卡（对齐 web PlanReviewPanel）。
+/// 协议应答经 [onAnswer]/[onPass]/[onDismiss] 上行。
 class InteractionComposer extends StatefulWidget {
   final PendingInteraction interaction;
   final Future<void> Function(String eventId, Object? value) onAnswer;
   final Future<void> Function(String eventId) onPass;
+  final Future<void> Function(String eventId) onDismiss;
 
   const InteractionComposer({
     super.key,
     required this.interaction,
     required this.onAnswer,
     required this.onPass,
+    required this.onDismiss,
   });
 
   @override
@@ -173,6 +209,9 @@ class _InteractionComposerState extends State<InteractionComposer> {
     final scheme = theme.colorScheme;
     final p = widget.interaction;
     final approval = p.isApproval;
+    // 计划评审走决策卡（对齐 web PlanReviewPanel），不复用问答流。
+    final review = approval ? null : planReviewOf(_questions);
+    if (review != null) return _planReviewCard(context, review, p.eventId);
     final accent = approval ? Colors.orangeAccent : scheme.primary;
     return Container(
       margin: const EdgeInsets.fromLTRB(10, 4, 10, 8),
@@ -278,6 +317,84 @@ class _InteractionComposerState extends State<InteractionComposer> {
               ),
             ]),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// 计划评审决策卡（对齐 web PlanReviewPanel）：
+  /// 「计划待审」条 + 计划 Markdown 全文 + 去聊天里说 / 拒绝 / 确认执行。
+  /// 无选项列表、无自由填、无「提交回答」。
+  Widget _planReviewCard(
+      BuildContext context, Map<String, dynamic> review, String eventId) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final plan = '${review['plan']}';
+    final declineLabel = review['declineLabel'] as String?;
+    void decide(String label) => _run(() => widget.onAnswer(eventId, {
+          'answers': [
+            {'id': '${review['id']}', 'selected': [label]}
+          ],
+        }));
+    return Container(
+      margin: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.6,
+      ),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 条：圆点 + 计划待审
+          Row(children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: const BoxDecoration(
+                  color: Colors.lightBlueAccent, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text('计划待审',
+                style: theme.textTheme.labelMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const Spacer(),
+            TextButton(
+              onPressed:
+                  _busy ? null : () => _run(() => widget.onDismiss(eventId)),
+              child: const Text('去聊天里说'),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          // 主体：计划全文（限高滚动）
+          Flexible(
+            child: SingleChildScrollView(
+              child: MarkdownText(plan),
+            ),
+          ),
+          const SizedBox(height: 10),
+          // 动作：拒绝（outline） / 确认执行（primary）
+          Row(children: [
+            const Spacer(),
+            if (declineLabel != null) ...[
+              OutlinedButton(
+                onPressed: _busy ? null : () => decide(declineLabel),
+                child: const Text('拒绝'),
+              ),
+              const SizedBox(width: 10),
+            ],
+            FilledButton(
+              onPressed: _busy
+                  ? null
+                  : () => decide('${review['approveLabel']}'),
+              child: Text(_busy ? '提交中…' : '确认执行'),
+            ),
+          ]),
         ],
       ),
     );

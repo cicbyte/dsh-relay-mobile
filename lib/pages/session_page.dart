@@ -1023,6 +1023,8 @@ class _SessionPageState extends State<SessionPage> {
                     onAnswer: (eventId, value) =>
                         InteractionCenter.I.answer(eventId, value),
                     onPass: (eventId) => InteractionCenter.I.pass(eventId),
+                    onDismiss: (eventId) =>
+                        InteractionCenter.I.dismiss(eventId),
                   ),
                 );
               }
