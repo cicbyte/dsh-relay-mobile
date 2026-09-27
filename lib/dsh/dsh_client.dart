@@ -61,6 +61,12 @@ class DshClient {
 
   /// 一元 RPC。[endpoint] 形如 "session/list"；[args] 为 payload.args 的内容。
   Future<Map<String, dynamic>> rpc(String endpoint, Map<String, dynamic> args) async {
+    final v = await rpcValue(endpoint, args);
+    return Map<String, dynamic>.from(v is Map ? v : const {});
+  }
+
+  /// 一元 RPC，返回原始 result.value（数组等非对象形状的端点用这个）。
+  Future<dynamic> rpcValue(String endpoint, Map<String, dynamic> args) async {
     final body = jsonEncode({
       'type': 'client-request',
       'rpcId': _uuid(),
@@ -85,7 +91,7 @@ class DshClient {
       final err = Map<String, dynamic>.from(result['error'] ?? {});
       throw DshRpcException('${err['code'] ?? 'unknown'}', '${err['message'] ?? ''}');
     }
-    return Map<String, dynamic>.from(result['value'] ?? {});
+    return result['value'];
   }
 
   // ---- 业务便捷方法（wire 参数名与服务端描述符严格一致）----
@@ -159,6 +165,24 @@ class DshClient {
         'agentId': sessionId,
         'request': {'data': base64Encode(bytes), 'name': name},
       });
+
+  /// @引用候选：文件/目录（fileReferences/list；args=agentId+query 平铺）。
+  /// 每项 {path, kind: 'file'|'directory'}。
+  Future<List<dynamic>> fileReferenceCandidates(String sessionId, String query) async {
+    final v = await rpcValue('fileReferences/list',
+        {'agentId': sessionId, 'query': query});
+    return v is List ? v : const [];
+  }
+
+  /// @引用候选：会话（sessionReferenceResolver/candidates；args=agentId+query）。
+  /// 每项 {mention, sessionId, label, cwd?, sameWorkspace, createdAt}——
+  /// mention 即规范 `@[label](dsh-session:<base64url id>)`，原样插入即可。
+  Future<List<dynamic>> sessionReferenceCandidates(
+      String sessionId, String query) async {
+    final v = await rpcValue('sessionReferenceResolver/candidates',
+        {'agentId': sessionId, 'query': query});
+    return v is List ? v : const [];
+  }
 
   /// 队列项编辑（对齐桌面 QueueDock → session/updateQueue，request 包裹）。
   /// [action] 三选一：{kind:'remove'} 撤回 / {kind:'steer'} 立即执行 /

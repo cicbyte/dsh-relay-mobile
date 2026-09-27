@@ -697,6 +697,31 @@ class _SessionPageState extends State<SessionPage> {
     }
   }
 
+  /// @ 提及（对齐桌面 input overlay：文件在前、会话在后；选中插入纯文本
+  /// mention——@path / @"带 空格"/ @dir/ / @[label](dsh-session:…)）。
+  Future<void> _pickReference() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => _ReferenceSheet(
+          client: widget.client, sessionId: widget.summary.sessionId),
+    );
+    if (picked == null || picked.isEmpty || !mounted) return;
+    final ctrl = _inputCtrl;
+    final sel = ctrl.selection;
+    final text = ctrl.text;
+    final insertAt =
+        (sel.isValid ? sel.baseOffset : text.length).clamp(0, text.length);
+    final head = text.substring(0, insertAt);
+    final tail = text.substring(insertAt);
+    final spacer =
+        head.isEmpty || head.endsWith(' ') || head.endsWith('\n') ? '' : ' ';
+    ctrl.text = '$head$spacer$picked $tail';
+    ctrl.selection = TextSelection.collapsed(
+        offset: head.length + spacer.length + picked.length + 1);
+    setState(() {});
+  }
+
   /// 权限预设 chip（桌面 PermissionSelect，下发 /permission <preset>）。
   Widget _accessChip() {
     final label = switch (_permissionPreset) {
@@ -1926,12 +1951,17 @@ class _SessionPageState extends State<SessionPage> {
                       if (_goalObjective.isNotEmpty) _goalDock(),
                       // 队列 dock（对齐桌面 QueueDock：排队消息展示/撤/改/立即）
                       if (_queueRows.isNotEmpty) _queueDock(),
-                      // 输入行：[+]附件 | 输入框 | 发送
+                      // 输入行：[+]附件 [@]提及 | 输入框 | 发送
                       Row(children: [
                         IconButton(
                           onPressed: _sending ? null : _pickFiles,
                           tooltip: '附件',
                           icon: const Icon(Icons.add_circle_outline),
+                        ),
+                        IconButton(
+                          onPressed: _sending ? null : _pickReference,
+                          tooltip: '提及文件或对话',
+                          icon: const Icon(Icons.alternate_email),
                         ),
                         Expanded(
                           child: TextField(
@@ -1971,6 +2001,168 @@ class _SessionPageState extends State<SessionPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// @ 提及弹层：文件（fileReferences/list）在前、会话
+/// （sessionReferenceResolver/candidates）在后；一域失败另一域照常。
+/// 选中 pop 插入串：文件=@path/@"p s"/@dir/，会话=候选自带 mention。
+class _ReferenceSheet extends StatefulWidget {
+  const _ReferenceSheet({required this.client, required this.sessionId});
+  final DshClient client;
+  final String sessionId;
+  @override
+  State<_ReferenceSheet> createState() => _ReferenceSheetState();
+}
+
+class _ReferenceSheetState extends State<_ReferenceSheet> {
+  final _q = TextEditingController();
+  Timer? _debounce;
+  List<dynamic> _files = const [];
+  List<dynamic> _sessions = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _q.addListener(_onQueryChanged);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _q.removeListener(_onQueryChanged);
+    _q.dispose();
+    super.dispose();
+  }
+
+  void _onQueryChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), _load);
+  }
+
+  Future<void> _load() async {
+    if (mounted) setState(() => _loading = true);
+    final q = _q.text.trim();
+    // 并行双域；单域失败回落空数组（对齐桌面失败行为）。
+    final results = await Future.wait<dynamic>([
+      widget.client
+          .fileReferenceCandidates(widget.sessionId, q)
+          .catchError((Object _) => const <dynamic>[]),
+      widget.client
+          .sessionReferenceCandidates(widget.sessionId, q)
+          .catchError((Object _) => const <dynamic>[]),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _files = results[0] as List<dynamic>;
+      _sessions = results[1] as List<dynamic>;
+      _loading = false;
+    });
+  }
+
+  /// 文件行 → 插入串（桌面 @path 语法：空格路径加引号、目录带尾斜杠）。
+  String _fileMention(Map<String, dynamic> item) {
+    final path = '${item['path'] ?? ''}';
+    if ('${item['kind']}' == 'directory') {
+      return path.endsWith('/') ? '@$path' : '@$path/';
+    }
+    return path.contains(RegExp(r'\s')) ? '@"$path"' : '@$path';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SizedBox(
+        height: 420,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: TextField(
+              controller: _q,
+              autofocus: true,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.alternate_email, size: 18),
+                hintText: '搜索文件或对话…',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ),
+          if (_loading)
+            const LinearProgressIndicator(minHeight: 2),
+          Expanded(
+            child: ListView(children: [
+              if (_files.isNotEmpty)
+                _groupHeader(scheme, Icons.folder_outlined, '文件'),
+              for (final raw in _files)
+                if (raw is Map)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(
+                        '${raw['kind']}' == 'directory'
+                            ? Icons.folder_outlined
+                            : Icons.insert_drive_file_outlined,
+                        size: 20,
+                        color: scheme.onSurfaceVariant),
+                    title: Text('${raw['path'] ?? ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13)),
+                    onTap: () =>
+                        Navigator.pop(context, _fileMention(Map<String, dynamic>.from(raw))),
+                  ),
+              if (_sessions.isNotEmpty)
+                _groupHeader(scheme, Icons.forum_outlined, '会话'),
+              for (final raw in _sessions)
+                if (raw is Map)
+                  ListTile(
+                    dense: true,
+                    leading:
+                        const Icon(Icons.chat_bubble_outline, size: 20),
+                    title: Text('${raw['label'] ?? ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13)),
+                    subtitle: raw['cwd'] == null
+                        ? null
+                        : Text('${raw['cwd']}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 10)),
+                    onTap: () => Navigator.pop(context, '${raw['mention'] ?? ''}'),
+                  ),
+              if (!_loading && _files.isEmpty && _sessions.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('无匹配候选',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey)),
+                ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _groupHeader(ColorScheme scheme, IconData icon, String label) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+      child: Row(children: [
+        Icon(icon, size: 14, color: scheme.primary),
+        const SizedBox(width: 6),
+        Text(label,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: scheme.primary)),
+      ]),
     );
   }
 }
