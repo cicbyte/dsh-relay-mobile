@@ -160,6 +160,15 @@ class DshClient {
         'request': {'data': base64Encode(bytes), 'name': name},
       });
 
+  /// 队列项编辑（对齐桌面 QueueDock → session/updateQueue，request 包裹）。
+  /// [action] 三选一：{kind:'remove'} 撤回 / {kind:'steer'} 立即执行 /
+  /// {kind:'edit', content:[blocks]} 改写。返回 {accepted:true}。
+  Future<Map<String, dynamic>> updateQueue(
+          String sessionId, String itemId, Map<String, dynamic> action) =>
+      rpc('session/updateQueue', {
+        'request': {'sessionId': sessionId, 'itemId': itemId, 'action': action}
+      });
+
   /// 模型目录：{default,routableProviders,groups:[{id,name,models:[...]}],failures}。
   Future<Map<String, dynamic>> modelCatalog() => rpc('session/modelCatalog', {});
 

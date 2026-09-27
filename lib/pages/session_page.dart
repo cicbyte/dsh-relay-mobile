@@ -68,6 +68,12 @@ class _SessionPageState extends State<SessionPage> {
   String _goalObjective = '';
   int _goalSeq = -1;
 
+  // ---- 队列 dock（session/control 流权威队列，对齐桌面 QueueDock） ----
+  StreamSubscription<Map<String, dynamic>>? _controlSub;
+  final Map<String, List<Map<String, dynamic>>> _controlQueues = {};
+  bool _queueCollapsed = true;
+  String _queueBusy = '';
+
   void _absorbPlan(WireRecord rec) {
     switch (rec.type) {
       case 'plan/mode':
@@ -152,6 +158,7 @@ class _SessionPageState extends State<SessionPage> {
   void dispose() {
     _ticker?.cancel();
     _sub?.cancel();
+    _controlSub?.cancel();
     _mux.close();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
@@ -175,6 +182,7 @@ class _SessionPageState extends State<SessionPage> {
 
   void _openFollow() {
     _gotFrame = false;
+    _openControl();
     _sub?.cancel();
     _sub = _mux.open('session/follow', {
       'request': {
@@ -465,6 +473,228 @@ class _SessionPageState extends State<SessionPage> {
         ),
       ]),
     );
+  }
+
+  /// 队列权威源：session/control 流（零参，流载体）——baseline 全量 +
+  /// `queue` 增量帧（items: {id, placement, rpcId?, message:{id, content}}）。
+  void _openControl() {
+    _controlSub?.cancel();
+    _controlSub = _mux.open('session/control', {}).listen((frame) {
+      if (!mounted) return;
+      final type = '${frame['type']}';
+      setState(() {
+        if (type == 'baseline') {
+          final queues = Map<String, dynamic>.from(
+              (frame['value'] as Map? ?? const {})['queues'] as Map? ?? {});
+          _controlQueues.clear();
+          for (final e in queues.entries) {
+            _controlQueues[e.key] = (e.value as List? ?? [])
+                .whereType<Map>()
+                .map((m) => Map<String, dynamic>.from(m))
+                .toList();
+          }
+        } else if (type == 'queue') {
+          _controlQueues['${frame['sessionId']}'] =
+              (frame['items'] as List? ?? [])
+                  .whereType<Map>()
+                  .map((m) => Map<String, dynamic>.from(m))
+                  .toList();
+        }
+      });
+    }, onError: (Object _) {/* 断线随 mux 重连重开 */});
+  }
+
+  /// 当前会话的队列行（placement: queued/steering/context）。
+  List<Map<String, dynamic>> get _queueRows =>
+      _controlQueues[widget.summary.sessionId] ?? const [];
+
+  /// 队列 dock（对齐桌面 QueueDock）：空队列不渲染；单条直显；多条折叠头。
+  Widget _queueDock() {
+    final rows = _queueRows;
+    final scheme = Theme.of(context).colorScheme;
+    final showList = rows.length == 1 || !_queueCollapsed;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        InkWell(
+          onTap: () => setState(() => _queueCollapsed = !_queueCollapsed),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+            child: Row(children: [
+              Icon(Icons.queue_outlined, size: 16, color: scheme.primary),
+              const SizedBox(width: 6),
+              Text('队列 · ${rows.length}',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.primary)),
+              const Spacer(),
+              TextButton(
+                onPressed: _queueBusy.isEmpty ? _steerAll : null,
+                style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 28)),
+                child: const Text('全部立即', style: TextStyle(fontSize: 12)),
+              ),
+              Icon(
+                  showList ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                  color: scheme.onSurfaceVariant),
+            ]),
+          ),
+        ),
+        if (showList)
+          for (var i = 0; i < rows.length; i++) _queueRow(i, rows[i], scheme),
+      ]),
+    );
+  }
+
+  /// 单条队列行：序号 + 预览 + [立即][撤][改]。
+  Widget _queueRow(int index, Map<String, dynamic> row, ColorScheme scheme) {
+    final msg = Map<String, dynamic>.from(row['message'] as Map? ?? {});
+    final content = (msg['content'] as List? ?? []).whereType<Map>().toList();
+    final text = content
+        .where((b) => '${b['type']}' == 'text')
+        .map((b) => '${b['text'] ?? ''}')
+        .join('\n')
+        .trim();
+    final files = content
+        .where((b) => '${b['type']}' == 'file' || '${b['type']}' == 'image')
+        .map((b) =>
+            '${(b['attachment'] as Map? ?? const {})['name'] ?? "附件"}')
+        .toList();
+    final placement = (row['placement'] ?? 'queued').toString();
+    final placeLabel = switch (placement) {
+      'steering' => '改道',
+      'context' => '上下文',
+      _ => '',
+    };
+    final itemId = (row['id'] ?? msg['id'] ?? '').toString();
+    final busy = _queueBusy == itemId;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      child: Row(children: [
+        Container(
+          width: 20,
+          height: 20,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: Text('${index + 1}',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (placeLabel.isNotEmpty)
+                Text(placeLabel,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.amberAccent,
+                        fontWeight: FontWeight.w600)),
+              Text(text.isEmpty ? '（附件消息）' : text,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12)),
+              if (files.isNotEmpty)
+                Text('📎 ${files.join('、')}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 10, color: scheme.onSurfaceVariant)),
+            ],
+          ),
+        ),
+        IconButton(
+          tooltip: '立即执行',
+          iconSize: 18,
+          padding: const EdgeInsets.all(4),
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: busy
+              ? null
+              : () => _queueAction(row, {'kind': 'steer'}, fail: '立即执行失败'),
+          icon: const Icon(Icons.bolt_outlined),
+        ),
+        IconButton(
+          tooltip: '撤回',
+          iconSize: 18,
+          padding: const EdgeInsets.all(4),
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: busy
+              ? null
+              : () => _queueAction(row, {'kind': 'remove'}, fail: '撤回失败'),
+          icon: const Icon(Icons.close_outlined),
+        ),
+        IconButton(
+          tooltip: '改写',
+          iconSize: 18,
+          padding: const EdgeInsets.all(4),
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: busy ? null : () => _queueEdit(row),
+          icon: const Icon(Icons.edit_outlined),
+        ),
+      ]),
+    );
+  }
+
+  /// 队列动作：session/updateQueue {request:{sessionId,itemId,action}}。
+  /// 控制流的 queue 帧会推回权威状态，本地不做乐观更新。
+  Future<void> _queueAction(Map<String, dynamic> row, Map<String, dynamic> action,
+      {String fail = '队列操作失败'}) async {
+    final msg = row['message'] as Map?;
+    final itemId = '${row['id'] ?? msg?['id'] ?? ''}';
+    if (itemId.isEmpty) return;
+    setState(() => _queueBusy = itemId);
+    try {
+      await widget.client.updateQueue(widget.summary.sessionId, itemId, action);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$fail：$e')));
+      }
+    } finally {
+      if (mounted && _queueBusy == itemId) setState(() => _queueBusy = '');
+    }
+  }
+
+  /// 改写队列消息（桌面行内编辑的弹窗版；弹窗自持 controller，走
+  /// State.dispose 合法回收——pop 返回后立即 dispose 会在退场动画中触发
+  /// framework 断言）。
+  Future<void> _queueEdit(Map<String, dynamic> row) async {
+    final msg = Map<String, dynamic>.from(row['message'] as Map? ?? {});
+    final content = (msg['content'] as List? ?? []).whereType<Map>().toList();
+    final text = content
+        .where((b) => '${b['type']}' == 'text')
+        .map((b) => '${b['text'] ?? ''}')
+        .join('\n');
+    final newText = await showDialog<String>(
+      context: context,
+      builder: (ctx) => _QueueEditDialog(initial: text),
+    );
+    if (newText == null || newText.trim().isEmpty) return;
+    await _queueAction(row, {
+      'kind': 'edit',
+      'content': [
+        {'type': 'text', 'text': newText.trim()}
+      ],
+    }, fail: '改写失败');
+  }
+
+  /// 全部立即执行：FIFO 逐条 steer（对齐桌面 QueueDock Steer all）。
+  Future<void> _steerAll() async {
+    final rows =
+        _queueRows.where((r) => '${r['placement'] ?? 'queued'}' == 'queued').toList();
+    for (final row in rows) {
+      await _queueAction(row, {'kind': 'steer'}, fail: '立即执行失败');
+    }
   }
 
   /// 权限预设 chip（桌面 PermissionSelect，下发 /permission <preset>）。
@@ -1694,6 +1924,8 @@ class _SessionPageState extends State<SessionPage> {
                       if (_draftFiles.isNotEmpty) _attachmentStrip(),
                       // 目标条（对齐桌面 GoalBar dock）
                       if (_goalObjective.isNotEmpty) _goalDock(),
+                      // 队列 dock（对齐桌面 QueueDock：排队消息展示/撤/改/立即）
+                      if (_queueRows.isNotEmpty) _queueDock(),
                       // 输入行：[+]附件 | 输入框 | 发送
                       Row(children: [
                         IconButton(
@@ -1739,6 +1971,46 @@ class _SessionPageState extends State<SessionPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 队列改写弹窗：自持 controller，pop 返回编辑文本（null=取消）。
+class _QueueEditDialog extends StatefulWidget {
+  const _QueueEditDialog({required this.initial});
+  final String initial;
+  @override
+  State<_QueueEditDialog> createState() => _QueueEditDialogState();
+}
+
+class _QueueEditDialogState extends State<_QueueEditDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initial);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('改写队列消息'),
+      content: TextField(controller: _ctrl, maxLines: 5, autofocus: true),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('取消')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context, _ctrl.text),
+            child: const Text('保存')),
+      ],
     );
   }
 }
