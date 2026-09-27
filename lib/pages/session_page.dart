@@ -74,6 +74,10 @@ class _SessionPageState extends State<SessionPage> {
   bool _queueCollapsed = true;
   String _queueBusy = '';
 
+  // ---- 斜杠命令面板（对齐 dsh-client-ui-commands 的 / 触发菜单） ----
+  List<Map<String, dynamic>> _commands = const [];
+  bool _commandsLoaded = false;
+
   void _absorbPlan(WireRecord rec) {
     switch (rec.type) {
       case 'plan/mode':
@@ -146,6 +150,7 @@ class _SessionPageState extends State<SessionPage> {
     super.initState();
     _mux = DshMux(widget.client);
     InteractionCenter.I.ensureStarted(widget.client);
+    _inputCtrl.addListener(_onInputChanged);
     // 断线自动重连后自动重订阅（避免人工点重试）
     _mux.onReconnected = _openFollow;
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -159,6 +164,7 @@ class _SessionPageState extends State<SessionPage> {
     _ticker?.cancel();
     _sub?.cancel();
     _controlSub?.cancel();
+    _inputCtrl.removeListener(_onInputChanged);
     _mux.close();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
@@ -695,6 +701,110 @@ class _SessionPageState extends State<SessionPage> {
     for (final row in rows) {
       await _queueAction(row, {'kind': 'steer'}, fail: '立即执行失败');
     }
+  }
+
+  // ---------------- 斜杠命令面板（/ 触发菜单） ----------------
+
+  /// 输入变化：/ 命令名 token 未敲完时显示面板并按需拉目录。
+  void _onInputChanged() {
+    if (_paletteQuery != null && !_commandsLoaded) _loadCommands();
+    setState(() {});
+  }
+
+  /// 面板激活时的命令名 token（/ 之后、第一个空白之前）；非 / 开头或
+  /// token 已敲完（已出现空格）返回 null → 面板隐藏。
+  String? get _paletteQuery {
+    final text = _inputCtrl.text;
+    if (!text.startsWith('/')) return null;
+    final rest = text.substring(1);
+    final m = RegExp(r'\s').firstMatch(rest);
+    return m == null ? rest : null;
+  }
+
+  Future<void> _loadCommands() async {
+    try {
+      final v = await widget.client.commandList(widget.summary.sessionId);
+      if (!mounted) return;
+      setState(() {
+        _commands = v
+            .whereType<Map>()
+            .map((m) => Map<String, dynamic>.from(m))
+            .toList();
+        _commandsLoaded = true;
+      });
+    } catch (_) {
+      // 面板静默不可用（commands/list 不可达时发送路径原有兜底不变）。
+    }
+  }
+
+  /// 桌面同款匹配：不区分大小写的子序列模糊匹配，前缀排名最高。
+  List<Map<String, dynamic>> _paletteMatches(String q) {
+    final lq = q.toLowerCase();
+    final out = _commands.where((c) {
+      final name = '${c['name'] ?? ''}'.toLowerCase();
+      var i = 0;
+      for (final ch in lq.split('')) {
+        i = name.indexOf(ch, i);
+        if (i < 0) return false;
+        i++;
+      }
+      return true;
+    }).toList();
+    out.sort((a, b) {
+      final an = '${a['name'] ?? ''}'.toLowerCase();
+      final bn = '${b['name'] ?? ''}'.toLowerCase();
+      final ap = an.startsWith(lq) ? 0 : 1;
+      final bp = bn.startsWith(lq) ? 0 : 1;
+      if (ap != bp) return ap - bp;
+      return an.length.compareTo(bn.length);
+    });
+    return out;
+  }
+
+  Widget _commandPalette() {
+    final q = _paletteQuery;
+    if (q == null) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final matches = _paletteMatches(q);
+    if (matches.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      constraints: const BoxConstraints(maxHeight: 230),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(10),
+        color: scheme.surfaceContainerHighest,
+      ),
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        children: [
+          for (final c in matches.take(8))
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.terminal, size: 18, color: scheme.primary),
+              title: Text('/${c['name'] ?? ''}',
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600)),
+              subtitle: Text('${c['description'] ?? ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11)),
+              onTap: () => _pickCommand(c),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 选中命令：带 input 描述符的补尾随空格进入参数输入，裸命令原样待发。
+  void _pickCommand(Map<String, dynamic> c) {
+    final name = '${c['name'] ?? ''}';
+    final hasInput = c['input'] is Map;
+    _inputCtrl.text = hasInput ? '/$name ' : '/$name';
+    _inputCtrl.selection =
+        TextSelection.collapsed(offset: _inputCtrl.text.length);
+    setState(() {});
   }
 
   /// @ 提及（对齐桌面 input overlay：文件在前、会话在后；选中插入纯文本
@@ -1951,6 +2061,8 @@ class _SessionPageState extends State<SessionPage> {
                       if (_goalObjective.isNotEmpty) _goalDock(),
                       // 队列 dock（对齐桌面 QueueDock：排队消息展示/撤/改/立即）
                       if (_queueRows.isNotEmpty) _queueDock(),
+                      // 斜杠命令面板（/ 命令名 token 未敲完时浮出候选）
+                      if (_paletteQuery != null) _commandPalette(),
                       // 输入行：[+]附件 [@]提及 | 输入框 | 发送
                       Row(children: [
                         IconButton(

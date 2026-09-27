@@ -166,6 +166,13 @@ class DshClient {
         'request': {'data': base64Encode(bytes), 'name': name},
       });
 
+  /// 斜杠命令目录（commands/list；args=agentId 平铺）→ [{name, description,
+  /// input?: {hint, attachments?}}]，name 小写无斜杠。
+  Future<List<dynamic>> commandList(String sessionId) async {
+    final v = await rpcValue('commands/list', {'agentId': sessionId});
+    return v is List ? v : const [];
+  }
+
   /// @引用候选：文件/目录（fileReferences/list；args=agentId+query 平铺）。
   /// 每项 {path, kind: 'file'|'directory'}。
   Future<List<dynamic>> fileReferenceCandidates(String sessionId, String query) async {
