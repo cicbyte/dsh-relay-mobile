@@ -52,6 +52,16 @@ class _SessionPageState extends State<SessionPage> {
   int _modeIdx = 0;
   bool _gotFrame = false;
 
+  // 计划模式状态：只认 seq 最大的 plan/mode 事件（翻旧页不会倒灌旧状态）。
+  int _planSeq = -1;
+  bool _planActive = false;
+
+  void _absorbPlan(WireRecord rec) {
+    if (rec.type != 'plan/mode' || rec.seq <= _planSeq) return;
+    _planSeq = rec.seq;
+    _planActive = rec.data['active'] == true;
+  }
+
   /// 「深度求索中…」秒级刷新用。
   Timer? _ticker;
 
@@ -167,6 +177,7 @@ class _SessionPageState extends State<SessionPage> {
             if (r is Map) {
               final rec = WireRecord.fromJson(Map<String, dynamic>.from(r));
               _records[rec.seq] = rec;
+              _absorbPlan(rec);
             }
           }
           _updateMinSeq();
@@ -176,6 +187,7 @@ class _SessionPageState extends State<SessionPage> {
             final rec = WireRecord.fromJson(Map<String, dynamic>.from(e));
             _records[rec.seq] = rec;
             _updateMinSeq();
+            _absorbPlan(rec);
             // session/title：顶栏已实时反映（_displayTitle），这里借
             // onSessionEnded 钩子刷新侧栏/列表的标题。
             if (rec.type == 'session/title') {
@@ -227,6 +239,7 @@ class _SessionPageState extends State<SessionPage> {
           if (r is Map) {
             final rec = WireRecord.fromJson(Map<String, dynamic>.from(r));
             _records.putIfAbsent(rec.seq, () => rec);
+            _absorbPlan(rec);
           }
         }
         _hasMore = v['hasMore'] == true;
@@ -240,6 +253,12 @@ class _SessionPageState extends State<SessionPage> {
   Future<void> _send() async {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty || _sending) return;
+    // `/` 开头走命令通道（对齐 web 输入层）：commands/execute 而非
+    // session/prompt。未知命令（如粘贴的 /path/... 路径）回落普通消息。
+    if (text.startsWith('/')) {
+      await _runCommand(text);
+      return;
+    }
     setState(() => _sending = true);
     try {
       final tz = await deviceTimeZoneId();
@@ -265,6 +284,99 @@ class _SessionPageState extends State<SessionPage> {
     } finally {
       if (mounted) setState(() => _sending = false);
     }
+  }
+
+  /// 斜杠命令：`commands/execute {agentId, line, submittedAttachments}`。
+  /// 成功 toast 结果文案（command/run|done tile 随事件流落转录）；
+  /// 未知命令回落普通消息；其他失败还原输入框内容。
+  Future<void> _runCommand(String line) async {
+    setState(() => _sending = true);
+    try {
+      final v = await widget.client.rpc('commands/execute', {
+        'agentId': widget.summary.sessionId,
+        'line': line,
+        'submittedAttachments': <dynamic>[],
+      });
+      final result = Map<String, dynamic>.from(v['result'] as Map? ?? {});
+      final kind = '${result['kind'] ?? ''}';
+      final text = '${result['text'] ?? ''}';
+      if (kind == 'error') {
+        final unknown = RegExp(r'not found|unknown|未知|没有找到|未注册',
+                caseSensitive: false)
+            .hasMatch(text);
+        if (unknown) {
+          // 不是命令（例如粘贴的 /path/...）：按普通消息发送。
+          setState(() => _sending = false);
+          await _sendPlain(line);
+          return;
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('命令失败：$text')));
+        }
+        return; // 保留输入框内容供修改
+      }
+      _inputCtrl.clear();
+      widget.onSessionEnded?.call();
+      if (mounted && text.isNotEmpty) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(text)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('命令失败：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  /// 计划模式开关：/plan on|off 走命令通道（与 web 的计划开关同路）。
+  /// 状态以 plan/mode 事件落账为准（命令结果提示"下一轮生效"语义）。
+  Future<void> _togglePlan() async {
+    final line = _planActive ? '/plan off' : '/plan on';
+    try {
+      final v = await widget.client.rpc('commands/execute', {
+        'agentId': widget.summary.sessionId,
+        'line': line,
+        'submittedAttachments': <dynamic>[],
+      });
+      final result = Map<String, dynamic>.from(v['result'] as Map? ?? {});
+      final text = '${result['text'] ?? ''}';
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(text.isEmpty ? '$line 已执行' : text)));
+      }
+      widget.onSessionEnded?.call();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('命令失败：$e')));
+      }
+    }
+  }
+
+  /// 普通消息发送（命令回落路径复用）。
+  Future<void> _sendPlain(String text) async {
+    final tz = await deviceTimeZoneId();
+    final parent = widget.summary.parentSessionId;
+    if (parent != null) {
+      await widget.client.subagentPrompt(
+        parentSessionId: parent,
+        childSessionId: widget.summary.sessionId,
+        text: text,
+        clientTimeZone: tz,
+      );
+    } else {
+      await widget.client.sessionPrompt(
+        widget.summary.sessionId,
+        text,
+        clientTimeZone: tz,
+      );
+    }
+    _inputCtrl.clear();
+    widget.onSessionEnded?.call();
   }
 
   Future<void> _cancel() async {
@@ -1097,6 +1209,16 @@ class _SessionPageState extends State<SessionPage> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          // 计划模式指示 + 开关（对齐 web dsh-client-ui-plan）：
+          // 点按切 /plan on|off，状态随 plan/mode 事件点亮。
+          IconButton(
+            onPressed: _togglePlan,
+            tooltip: _planActive ? '计划模式 · 开（点按退出）' : '计划模式 · 关（点按开启）',
+            icon: Icon(
+              Icons.map_outlined,
+              color: _planActive ? Colors.lightBlueAccent : null,
+            ),
+          ),
           if (isSubagent && canPop)
             TextButton(
               onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
