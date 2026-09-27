@@ -176,6 +176,13 @@ class _SessionPageState extends State<SessionPage> {
             final rec = WireRecord.fromJson(Map<String, dynamic>.from(e));
             _records[rec.seq] = rec;
             _updateMinSeq();
+            // session/title：顶栏已实时反映（_displayTitle），这里借
+            // onSessionEnded 钩子刷新侧栏/列表的标题。
+            if (rec.type == 'session/title') {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) widget.onSessionEnded?.call();
+              });
+            }
           }
         // assistant-stream 帧：v1 不做打字机效果，忽略
       }
@@ -906,12 +913,160 @@ class _SessionPageState extends State<SessionPage> {
             icon: Icons.security_outlined,
             color: scheme.onSurfaceVariant,
             text: '沙箱 · ${r.data['mode'] ?? ''}');
+      // ---- 权限 / 审批策略（与 sandbox/mode 同族状态条，web 端同组渲染） ----
+      case 'permission/preset':
+        return _chipTile(
+            icon: Icons.admin_panel_settings_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '权限预设 · ${r.data['preset'] ?? ''}');
+      case 'approval/policy':
+        return _chipTile(
+            icon: Icons.verified_user_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '审批策略 · ${r.data['policy'] ?? ''}',
+            sub: '${r.data['source'] ?? ''}' == 'delegation' ? '来源：委派' : null);
+      // ---- 模型重试（透明化卡顿/失败恢复） ----
+      case 'llm/retry':
+        final retryNo = '${r.data['retry'] ?? '?'}';
+        final maxNo = '${r.data['maxRetries'] ?? ''}';
+        final delayMs = (r.data['delayMs'] as num? ?? 0).toInt();
+        final failure = r.data['failure'];
+        final failText = failure is Map
+            ? '${failure['message'] ?? failure['name'] ?? failure['code'] ?? ''}'
+            : '$failure';
+        return _chipTile(
+            icon: Icons.replay_outlined,
+            color: Colors.amberAccent,
+            text:
+                '模型重试 · 第 $retryNo${maxNo.isEmpty ? '' : '/$maxNo'} 次（${delayMs}ms 后）',
+            sub: failText.isEmpty || failText == 'null' ? null : failText);
+      case 'llm/retry-started':
+        return _chipTile(
+            icon: Icons.replay_outlined,
+            color: Colors.amberAccent,
+            text: '模型重试开始 · 第 ${r.data['retry'] ?? '?'} 次');
+      // ---- 消息反馈（👍/👎 + 备注） ----
+      case 'feedback/message-put':
+        final note = '${r.data['note'] ?? ''}'.trim();
+        return _chipTile(
+            icon: '${r.data['rating']}' == 'negative'
+                ? Icons.thumb_down_alt_outlined
+                : Icons.thumb_up_alt_outlined,
+            color: Colors.tealAccent,
+            text: '消息反馈 · ${'${r.data['rating']}' == 'negative' ? '差评' : '好评'}',
+            sub: note.isEmpty ? null : note);
+      case 'feedback/message-delete':
+        return _chipTile(
+            icon: Icons.delete_outline,
+            color: scheme.onSurfaceVariant,
+            text: '消息反馈 · 已撤下');
+      case 'feedback/record':
+        return _chipTile(
+            icon: Icons.rate_review_outlined,
+            color: Colors.tealAccent,
+            text: '反馈记录 · ${r.data['kind'] ?? r.data['rating'] ?? ''}',
+            sub: '${r.data['note'] ?? ''}'.trim().isEmpty
+                ? null
+                : '${r.data['note']}'.trim());
+      // ---- 队列消息改写 / 撤回（inbox splice） ----
+      // 语义：insert=入队、remove=出队（送达）、同事件两者并存=改写、
+      // outcome:'canceled'=撤回。纯入队/出队是管道流量（会以 user/message
+      // 呈现或随轮次消化），不渲染；只显示真正的撤回与改写。
+      case 'agent/inbox/spliced':
+        final inserted =
+            (r.data['inserted'] as List? ?? []).whereType<Map>().toList();
+        final removed = (r.data['removedCount'] as num? ?? 0).toInt();
+        final canceled = '${r.data['outcome'] ?? ''}' == 'canceled';
+        final edited = removed > 0 && inserted.isNotEmpty;
+        if (!canceled && !edited) return const SizedBox.shrink();
+        final preview = inserted
+            .map((m) => _contentText(m['content'] ?? m))
+            .where((s) => s.trim().isNotEmpty)
+            .join('\n');
+        return _chipTile(
+            icon: Icons.edit_note_outlined,
+            color: Colors.pinkAccent,
+            text: canceled
+                ? '消息撤回'
+                : '消息改写 · 撤下 $removed 条 / 补入 ${inserted.length} 条',
+            sub: preview.isEmpty ? null : preview);
+      // ---- 定时任务变更 ----
+      case 'schedule/change':
+        final op = '${r.data['operation'] ?? ''}';
+        final opLabel = switch (op) {
+          'delete' => '已删除',
+          'create' => '已创建',
+          'update' => '已更新',
+          _ => op,
+        };
+        return _chipTile(
+            icon: Icons.schedule_outlined,
+            color: Colors.lightBlueAccent,
+            text: '定时任务 · $opLabel',
+            sub: '${r.data['id'] ?? ''}');
+      // ---- B 档：低频事件折叠成一行小 tile，不刷屏也不失可见性 ----
+      case 'assistant/attempt':
+        return _chipTile(
+            icon: Icons.history_edu_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '一次未完成的输出（随后重试）');
+      case 'hook/invoked':
+        return _chipTile(
+            icon: Icons.bolt_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '钩子 · ${r.data['name'] ?? r.data['hook'] ?? ''}');
+      case 'hook/result':
+        if (r.data['error'] == null && '${r.data['ok']}' != 'false') {
+          return const SizedBox.shrink();
+        }
+        return _chipTile(
+            icon: Icons.error_outline,
+            color: scheme.error,
+            text: '钩子失败 · ${r.data['name'] ?? r.data['hook'] ?? ''}',
+            sub: '${r.data['error'] ?? r.data['message'] ?? ''}');
+      case 'subagent/catalog':
+        return _chipTile(
+            icon: Icons.account_tree_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '子agent 目录更新');
+      case 'subagent/model-selection-policy':
+        return _chipTile(
+            icon: Icons.account_tree_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '子agent 模型策略更新');
+      case 'team/member':
+        return _chipTile(
+            icon: Icons.groups_outlined,
+            color: Colors.cyanAccent,
+            text: '团队成员 · ${r.data['member'] is Map ? '${(r.data['member'] as Map)['name'] ?? (r.data['member'] as Map)['role'] ?? ''}' : ''}');
+      case 'team/task':
+        return _chipTile(
+            icon: Icons.groups_outlined,
+            color: Colors.cyanAccent,
+            text: '团队任务 · ${r.data['task'] is Map ? '${(r.data['task'] as Map)['title'] ?? (r.data['task'] as Map)['summary'] ?? (r.data['task'] as Map)['status'] ?? ''}' : ''}');
+      case 'team/message/queued':
+        return _chipTile(
+            icon: Icons.groups_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '团队消息 · 排队');
+      case 'team/message/delivered':
+        return _chipTile(
+            icon: Icons.groups_outlined,
+            color: scheme.onSurfaceVariant,
+            text: '团队消息 · 已送达');
+      case 'compaction/prune':
+        final range = Map<String, dynamic>.from(r.data['shadowedRange'] as Map? ?? {});
+        final tok = (r.data['shadowedTokenCount'] as num? ?? 0).toInt();
+        return _chipTile(
+            icon: Icons.compress,
+            color: Colors.purpleAccent,
+            text: '上下文压缩 · 裁剪 #${range['start'] ?? '?'}–#${range['end'] ?? '?'}',
+            sub: tok > 0 ? '${_fmtTokens(tok)} tokens' : null);
       default:
-        // 协议内部噪声不渲染：step/*、turn/end、request/*、assistant/attempt、
-        // llm/retry*、hook/*、feedback/*、session/(end-seed|title-llm-request)、
-        // session-log-deepseek/*、subagent/(catalog|model-selection-policy)、
-        // approval/policy、permission/preset、schedule/change、team/*、web/*、
-        // tool/ptc-dispatch*。session/title 无气泡（标题已实时反映）。
+        // 剩余纯协议内部噪声不渲染（web 同样不显示）：step/*、turn/end、
+        // request/*、session/end-seed、session/title-llm-request、
+        // session-log-deepseek/*、tool/ptc-dispatch*、web/*。
+        // session/title 单独走标题同步（见 _liveTitle），不落气泡。
         return const SizedBox.shrink();
     }
   }
