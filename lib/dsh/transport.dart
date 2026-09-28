@@ -109,24 +109,120 @@ class _DirectSocket implements TransportSocket {
 }
 
 // ---------------------------------------------------------------------------
-// 云端转发：连 relay（dsh-relay-v1），经桌面桥透明隧道访问 dsh web
-// 帧协议见 relay/server.mjs 注释。
+// 云端转发：连 relay（dsh-relay-v1 hello v2），经桌面桥透明隧道访问 dsh web。
+//
+// 鉴权（hello v2）：
+//   - 已配对重连：deviceId + token（设备令牌持久化在安全存储）；
+//   - 首次配对：pairingCode（一次性，welcome.device 回发设备令牌需立即落盘）；
+//   - code 仅作房间寻址（绑房间的配对码/令牌可省略）。
 // ---------------------------------------------------------------------------
+/// reject 码 → 人话文案（UI 直接展示 + 引导动作）
+String relayRejectMessage(String code) {
+  switch (code) {
+    case 'auth-required':
+      return '中继要求设备凭证：请扫码配对或输入配对码';
+    case 'bad-token':
+      return '设备令牌失效：请重新配对';
+    case 'revoked':
+      return '该设备已在管理台被吊销：请重新配对';
+    case 'unknown-device':
+      return '设备不存在：请重新配对';
+    case 'pairing-invalid':
+      return '配对码无效：请核对或重新生成';
+    case 'pairing-expired':
+      return '配对码已过期（10 分钟内有效）：请重新生成';
+    case 'pairing-used':
+      return '配对码已被使用：请重新生成';
+    case 'pairing-burned':
+      return '配对码错误次数过多已熔断：请重新生成';
+    case 'room-mismatch':
+      return '配对码与所选环境不符：请使用该环境生成的配对码';
+    case 'role-mismatch':
+      return '配对码角色不符（Host/手机需分别生成）';
+    case 'rate-limited':
+      return '尝试过于频繁：请稍后再试';
+    case 'bad-code':
+      return '房间码无效（至少 6 位）';
+    case 'code':
+      return '共享码校验失败（旧模式）';
+    default:
+      return '中继拒绝连接（$code）';
+  }
+}
+
+/// 鉴权/凭据类拒绝：必须停掉自动重连（人工介入：重新配对/换码）
+bool isAuthReject(String code) => const {
+      'auth-required',
+      'bad-token',
+      'revoked',
+      'unknown-device',
+      'pairing-invalid',
+      'pairing-expired',
+      'pairing-used',
+      'pairing-burned',
+      'room-mismatch',
+      'role-mismatch',
+      'bad-code',
+      'bad-hello',
+      'bad-role',
+      'code',
+    }.contains(code);
+
 class RelayTransport extends DshTransport {
   final Uri relay;
+
+  /// 房间码（寻址；带令牌/绑房间配对码时可为空）
   final String code;
+
+  /// 已配对设备身份（与 token 成对；空=走 pairingCode 首配）
+  final String deviceId;
+  final String token;
+
+  /// 首次配对一次性码（核销即失效）
+  final String pairingCode;
+
+  /// 设备名（管理台展示）
+  final String name;
+
+  /// 首次配对成功：welcome.device 回发一次性令牌，必须立即持久化
+  final void Function(String id, String token)? onPaired;
+
+  /// 鉴权类拒绝（自动重连已停止，UI 需引导重新配对）
+  final void Function(String code, String message)? onAuthRejected;
+
   WebSocket? _ws;
   final Map<String, Completer<Map<String, dynamic>>> _pending = {};
   final Map<String, StreamController<String>> _sockets = {};
   final StreamController<Map<String, dynamic>> _events = StreamController.broadcast();
   bool _closed = false;
+  bool _authFailed = false;
+  String? lastAuthError;
 
-  RelayTransport(this.relay, {required this.code});
+  /// 配对成功后本实例持有的设备身份（供上层落盘后下次重连复用）
+  String? pairedDeviceId;
+  String? pairedToken;
+
+  RelayTransport(
+    this.relay, {
+    this.code = '',
+    this.deviceId = '',
+    this.token = '',
+    this.pairingCode = '',
+    this.name = '',
+    this.onPaired,
+    this.onAuthRejected,
+  });
 
   bool get isConnected => _ws != null;
 
+  /// 鉴权拒绝后为 true：不再自动重拨（治 1/s 重连风暴）
+  bool get authFailed => _authFailed;
+
   Future<void> connect() async {
     if (_ws != null) return;
+    if (_authFailed) {
+      throw TransportException('relay/${lastAuthError ?? 'auth'}', relayRejectMessage(lastAuthError ?? 'auth'));
+    }
     final ws = await WebSocket.connect(
       relay.replace(scheme: relay.scheme == 'https' ? 'wss' : 'ws').toString(),
       protocols: const ['dsh-relay-v1'],
@@ -147,16 +243,53 @@ class RelayTransport extends DshTransport {
       onError: (_) => _handleDisconnect(),
       cancelOnError: true,
     );
-    ws.add(jsonEncode({'type': 'hello', 'role': 'client', 'code': code}));
+    // hello v2：令牌重连 / 配对码首配走设备凭证，**必须省略 code**——
+    // 服务端把 code 的哈希当房间主张，绑房间的配对码/设备记录才是权威
+    // （发 room-id 当 code 会误触发 room-mismatch）。code 仅旧共享码模式用。
+    final hello = <String, dynamic>{
+      'type': 'hello',
+      'role': 'client',
+      if (name.isNotEmpty) 'name': name,
+    };
+    final useToken = deviceId.isNotEmpty && token.isNotEmpty;
+    if (useToken) {
+      hello['deviceId'] = deviceId;
+      hello['token'] = token;
+    } else if (pairingCode.isNotEmpty) {
+      hello['pairingCode'] = pairingCode;
+    } else if (code.isNotEmpty) {
+      hello['code'] = code;
+    }
+    ws.add(jsonEncode(hello));
     // 等 welcome / reject
     final verdict = await _events.stream
         .firstWhere((e) => e['type'] == 'welcome' || e['type'] == 'reject')
         .timeout(const Duration(seconds: 10), onTimeout: () => {'type': 'reject', 'code': 'auth-timeout'});
     if (verdict['type'] != 'welcome') {
       final c = '${verdict['code'] ?? 'rejected'}';
+      final msg = relayRejectMessage(c);
+      if (isAuthReject(c)) {
+        _authFailed = true;
+        lastAuthError = c;
+        onAuthRejected?.call(c, msg);
+      }
       await close();
-      throw TransportException('relay/$c', 'relay 拒绝连接（检查配对码/角色冲突）');
+      throw TransportException('relay/$c', msg);
     }
+    // 首配回执：一次性设备令牌 → 立即持久化（onPaired 回调负责落盘）
+    final dev = verdict['device'];
+    if (dev is Map && dev['token'] is String && '${dev['token']}'.isNotEmpty) {
+      pairedDeviceId = '${dev['id'] ?? ''}';
+      pairedToken = '${dev['token']}';
+      onPaired?.call(pairedDeviceId!, pairedToken!);
+    }
+  }
+
+  /// 断线后惰性重拨（request/openSocket 先调用）；鉴权失败不重拨。
+  Future<void> _ensureConnected() async {
+    if (_ws != null) return;
+    if (_closed) throw TransportException('relay/closed', '连接已关闭');
+    await connect();
   }
 
   void _dispatch(Map<String, dynamic> frame) {
@@ -209,8 +342,9 @@ class RelayTransport extends DshTransport {
     Map<String, String> headers = const {},
     String? body,
   }) async {
+    await _ensureConnected();
     final ws = _ws;
-    if (ws == null) throw TransportException('relay/not-connected', '请先 connect()');
+    if (ws == null) throw TransportException('relay/not-connected', '中继未连接');
     final rid = '${DateTime.now().microsecondsSinceEpoch}-${_pending.length}';
     final c = Completer<Map<String, dynamic>>();
     _pending[rid] = c;
@@ -232,8 +366,9 @@ class RelayTransport extends DshTransport {
 
   @override
   Future<TransportSocket> openSocket(String path, {Map<String, String> headers = const {}}) async {
+    await _ensureConnected();
     final ws = _ws;
-    if (ws == null) throw TransportException('relay/not-connected', '请先 connect()');
+    if (ws == null) throw TransportException('relay/not-connected', '中继未连接');
     final rid = '${DateTime.now().microsecondsSinceEpoch}-s${_sockets.length}';
     final sc = StreamController<String>();
     _sockets[rid] = sc;

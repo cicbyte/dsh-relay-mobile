@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'dsh/conn_store.dart';
 import 'dsh/dsh_client.dart';
+import 'dsh/profiles.dart';
 import 'dsh/transport.dart';
 import 'pages/connect_page.dart';
 import 'pages/session_page.dart';
@@ -32,25 +33,51 @@ class _AppRootState extends State<AppRoot> {
     _autoConnect();
   }
 
-  /// 启动自动重连：用上次成功的连接配置直接连（持久化，免每次手配）。
+  /// 启动自动重连：用上次的活动环境直接连（Profile 持久化，免每次手配）。
   /// 自动重连失败不打扰用户（桌面未启动/adb reverse 未建立等），
   /// 停在空态，连接设置页手动连接照常可用。
+  /// 鉴权类拒绝（令牌失效/被吊销等）由 RelayTransport 内部停止重拨，
+  /// 这里只试一次，绝不产生 1/s 重连风暴。
   Future<void> _autoConnect() async {
-    // 有存档用存档；首次启动用默认直连配置直接试连（失败静默，零配置即用）。
-    final c = await ConnStore.loadConfig() ?? const ConnConfig();
+    // 有环境用活动环境；首次启动用默认直连配置直接试连（失败静默，零配置即用）。
+    final profiles = await ProfileStore.load();
+    final activeId = await ProfileStore.activeId();
+    EnvProfile? picked;
+    for (final e in profiles) {
+      if (e.id == activeId) {
+        picked = e;
+        break;
+      }
+    }
+    final p = picked ??
+        (profiles.isNotEmpty ? profiles.first : EnvProfile(id: 'default', name: '默认环境', mode: 0));
     if (!mounted) return;
     try {
       final DshTransport transport;
       final String modeLabel;
-      if (c.mode == 0) {
-        final raw = c.url.replaceFirst(RegExp(r'/+$'), '');
+      if (!p.isRelay) {
+        final raw = p.url.replaceFirst(RegExp(r'/+$'), '');
         transport = DirectTransport(Uri.parse(raw));
         modeLabel = '直连 · $raw';
       } else {
-        final relay = RelayTransport(Uri.parse(c.relay), code: c.code);
+        final savedToken = await ProfileStore.tokenOf(p.id) ?? '';
+        final relay = RelayTransport(
+          Uri.parse(p.relay),
+          code: p.roomCode,
+          deviceId: p.deviceId,
+          token: savedToken,
+          pairingCode: p.pairingCode,
+          name: p.name,
+          onPaired: (id, tok) async {
+            p.deviceId = id;
+            p.pairingCode = '';
+            await ProfileStore.saveToken(p.id, tok);
+            await ProfileStore.save(profiles);
+          },
+        );
         await relay.connect();
         transport = relay;
-        modeLabel = '云端转发 · ${c.relay}';
+        modeLabel = '云端转发 · ${p.name}';
       }
       final client = DshClient(transport);
       await client.sessionList(); // 连通性自检

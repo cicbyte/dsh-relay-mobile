@@ -42,6 +42,12 @@ dependencies:
   markdown: ^7.3.0
   # 连接配置 / 上次会话持久化（启动自动重连、自动恢复会话）
   shared_preferences: ^2.3.0
+  # 设备配对令牌（长效凭证）进系统安全存储（Keystore/Keychain）
+  flutter_secure_storage: ^9.2.2
+  # 扫码入网（转发/局域网二维码，相机 + 相册识别）
+  mobile_scanner: ^5.2.3
+  # 局域网自动发现（mDNS/NSD，_dsh._tcp）
+  nsd: ^5.0.1
   file_picker: ^8.0.0
 
 dev_dependencies:
