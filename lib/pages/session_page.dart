@@ -510,9 +510,13 @@ class _SessionPageState extends State<SessionPage> {
     }, onError: (Object _) {/* 断线随 mux 重连重开 */});
   }
 
-  /// 当前会话的队列行（placement: queued/steering/context）。
+  /// 当前会话的队列行。与桌面 QueueDock 严格同源同滤：只显示
+  /// placement==='queued'（steering 改道中 / context 已进上下文的项桌面
+  /// 同样隐藏——那两类残留曾导致「桌面没了手机还显示」）。
   List<Map<String, dynamic>> get _queueRows =>
-      _controlQueues[widget.summary.sessionId] ?? const [];
+      (_controlQueues[widget.summary.sessionId] ?? const [])
+          .where((r) => '${r['placement'] ?? 'queued'}' == 'queued')
+          .toList();
 
   /// 队列 dock（对齐桌面 QueueDock）：空队列不渲染；单条直显；多条折叠头。
   Widget _queueDock() {
