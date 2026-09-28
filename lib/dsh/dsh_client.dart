@@ -16,7 +16,7 @@ import 'transport.dart';
 ///  3. 鉴权：GET /?token=<launchToken>（不跟随 303）换 dsh-auth-* cookie，之后全部请求带 Cookie。
 ///
 /// 信任栅栏要求 Host 为 loopback 或 trustedHosts——直连走 adb reverse、
-/// 云端转发走桌面桥（桥对本机 dsh 固定 Host=loopback），都无需额外配置；
+/// 云端转发走 dsh（手机通道插件；桥对本机 dsh 固定 Host=loopback），都无需额外配置；
 /// 不要发送 Origin / sec-fetch-site 头。
 
 class DshRpcException implements Exception {
@@ -286,7 +286,7 @@ class DshMux {
     // 直连模式下 DSH 服务端每 2s 发 WS Ping、连续 2 次未回 Pong 即 terminate
     // （dsh-api-gateway MAX_MISSED_HEARTBEATS=2）；dart:io 自动回 Pong，但主 isolate
     // 被大快照阻塞会延迟应答——消费侧控制单帧工作量（maxMessages 不宜过大）。
-    // 云端转发模式下 ping/pong 由桌面桥就地应答，手机链路另有 relay 自己的心跳。
+    // 云端转发模式下 ping/pong 由 dsh（手机通道）就地应答，手机链路另有 relay 自己的心跳。
     final sock = await client.transport.openSocket(
       '/api/remote.mux',
       headers: {if (client.cookie != null) 'cookie': client.cookie!},
