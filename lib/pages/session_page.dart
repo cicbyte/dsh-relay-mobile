@@ -98,9 +98,14 @@ class _SessionPageState extends State<SessionPage> {
         if (rec.seq <= _goalSeq) return;
         _goalSeq = rec.seq;
         final goal = Map<String, dynamic>.from(rec.data['goal'] as Map? ?? {});
-        _goalObjective = rec.data['operation'] == 'clear'
-            ? ''
-            : '${goal['objective'] ?? ''}';
+        // 与桌面 GoalDock（dsh-client-ui-goal client.js:205）同判：
+        // clear 墓碑或 phase==='complete' 都不渲染。注意 complete 写的是
+        // 带 phase 的全量快照、不是 clear——漏判 phase 曾致已完成目标
+        // 在桌面消失后手机仍挂着（「桌面没了手机还显示」）。
+        _goalObjective =
+            (rec.data['operation'] == 'clear' || '${goal['phase']}' == 'complete')
+                ? ''
+                : '${goal['objective'] ?? ''}';
     }
   }
 
