@@ -55,3 +55,17 @@ App 内保持默认 `http://127.0.0.1:3080` 直接点「连接」即可。
   （`dsh-api-gateway` `MAX_MISSED_HEARTBEATS=2`）。dart:io 自动回 Pong，
   但主 isolate 被大快照阻塞会延迟应答——`session/follow` 的 `maxMessages` 不宜过大
 - 构建环境：Gradle wrapper 已从 9.3.1 切 9.5.0（9.3.1 存在 kotlin-dsl 访问器生成 bug）
+
+## 环境（Profile）与配对（调试备忘）
+
+- **一切皆环境**：局域网直连（url+安全码）与云端转发（relay+房间+配对/令牌）统一为
+  `EnvProfile` 卡片流，多环境并存一键切换；列表存 SharedPreferences，**设备令牌存
+  flutter_secure_storage**（Keystore/Keychain，键 `dev.token.<profileId>`）。
+- **hello v2 纪律**：带 `deviceId+token` 或 `pairingCode` 时**必须省略 `code`**（服务端把
+  `code` 哈希当房间主张，混用误报 `room-mismatch`）；`code` 仅旧共享码模式。
+- 配对成功 `welcome.device` 回发一次性令牌 → 立即落盘 + 清 profile 里的配对码；
+  此后重连走令牌。**鉴权类拒绝（revoked/bad-token/pairing-* 等）停止自动重连**
+  （`isAuthReject` + `_authFailed` 制动，治 1/s 风暴），UI 展示人话文案引导重新配对。
+- 扫码入网 payload（`qr_payload.dart`）：`dshrelay://host:port/?pair=&room=&name=` /
+  `dshlan://ip:port/?code=&name=`；相机（mobile_scanner）+ 相册识别 + 粘贴兜底。
+- 局域网发现（`discovery.dart`）：nsd/mDNS `_dsh._tcp`，12s 扫描窗口点选建环境。
