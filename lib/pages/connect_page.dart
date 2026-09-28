@@ -129,7 +129,7 @@ class _ConnectPageState extends State<ConnectPage> {
   String _friendlyError(TransportException e) {
     switch (e.code) {
       case 'peer-offline':
-        return '已连上中继，但桌面端不在线（手机通道/桥未运行）：请打开桌面 dsh 后重试';
+        return '已连上中继，但主端不在线（手机通道未运行）：请打开 dsh 端后重试';
       case 'relay/closed':
       case 'relay/not-connected':
         return '与中继的连接已断开：请重新连接';

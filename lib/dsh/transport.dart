@@ -109,7 +109,7 @@ class _DirectSocket implements TransportSocket {
 }
 
 // ---------------------------------------------------------------------------
-// 云端转发：连 relay（dsh-relay-v1 hello v2），经桌面桥透明隧道访问 dsh web。
+// 云端转发：连 relay（dsh-relay-v1 hello v2），经主端（手机通道插件）透明隧道访问 dsh web。
 //
 // 鉴权（hello v2）：
 //   - 已配对重连：deviceId + token（设备令牌持久化在安全存储）；
