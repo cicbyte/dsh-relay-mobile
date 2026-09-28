@@ -390,6 +390,8 @@ class _EditSheetState extends State<_EditSheet> {
   late final TextEditingController _relay;
   late final TextEditingController _roomCode;
   late final TextEditingController _pair;
+  late final TextEditingController _deviceId;
+  late final TextEditingController _token;
 
   @override
   void initState() {
@@ -402,6 +404,8 @@ class _EditSheetState extends State<_EditSheet> {
     _relay = TextEditingController(text: p?.relay ?? 'ws://127.0.0.1:8787');
     _roomCode = TextEditingController(text: p?.roomCode ?? '');
     _pair = TextEditingController(text: p?.pairingCode ?? '');
+    _deviceId = TextEditingController(text: p?.deviceId ?? '');
+    _token = TextEditingController();
   }
 
   @override
@@ -412,10 +416,12 @@ class _EditSheetState extends State<_EditSheet> {
     _relay.dispose();
     _roomCode.dispose();
     _pair.dispose();
+    _deviceId.dispose();
+    _token.dispose();
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final p = widget.initial ??
         EnvProfile(id: 'env-${DateTime.now().millisecondsSinceEpoch}', name: '');
     p.name = _name.text.trim().isEmpty ? (p.name.isEmpty ? '新环境' : p.name) : _name.text.trim();
@@ -425,7 +431,19 @@ class _EditSheetState extends State<_EditSheet> {
     p.relay = _relay.text.trim();
     p.roomCode = _roomCode.text.trim();
     p.pairingCode = _pair.text.trim();
-    Navigator.of(context).pop(p);
+    // 手填设备身份：令牌只进安全存储；身份变更/清空即视为重新配对
+    final devId = _deviceId.text.trim();
+    if (devId != p.deviceId) {
+      if (devId.isEmpty) {
+        await ProfileStore.clearToken(p.id);
+      }
+      p.deviceId = devId;
+    }
+    final tok = _token.text.trim();
+    if (tok.isNotEmpty) {
+      await ProfileStore.saveToken(p.id, tok);
+    }
+    if (mounted) Navigator.of(context).pop(p);
   }
 
   @override
@@ -513,6 +531,25 @@ class _EditSheetState extends State<_EditSheet> {
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _deviceId,
+                decoration: const InputDecoration(
+                  labelText: '设备 ID（可选，已有配对时手填）',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _token,
+                decoration: const InputDecoration(
+                  labelText: '设备令牌（可选，手填即入安全存储）',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                obscureText: true,
               ),
               const SizedBox(height: 8),
               Text(
