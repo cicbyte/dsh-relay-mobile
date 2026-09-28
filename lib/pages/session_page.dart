@@ -416,10 +416,11 @@ class _SessionPageState extends State<SessionPage> {
 
   // ================= composer 配件（对齐桌面输入区） =================
 
-  /// 占位文案随状态切换（桌面 placeholder.plan/default 同语义）。
+  /// 占位文案随状态切换（药丸内宽度有限，单行 hintMaxLines:1；
+  /// / 与 @ 的可发现性由输入行为与 @ 图标承担）。
   String _placeholderText() {
     if (_planActive) return '描述你的任务以生成计划';
-    return '输入消息…  / 调用指令，+ 添加附件';
+    return '输入消息…';
   }
 
   String _imageMime(String name) {
@@ -841,44 +842,29 @@ class _SessionPageState extends State<SessionPage> {
     setState(() {});
   }
 
-  /// 权限预设 chip（桌面 PermissionSelect，下发 /permission <preset>）。
-  Widget _accessChip() {
-    final label = switch (_permissionPreset) {
-      'read-only' => '仅可查看',
-      'workspace-write' => '工作区内修改',
-      'danger-full-access' => '完全权限',
-      '' => '权限',
-      _ => _permissionPreset,
-    };
-    return ActionChip(
-      avatar: const Icon(Icons.admin_panel_settings_outlined, size: 16),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-      onPressed: _pickPermission,
-    );
-  }
+  /// 权限预设显示名（图标 tooltip 与菜单共用）。
+  String _permissionLabel(String preset) => switch (preset) {
+        'read-only' => '仅可查看',
+        'workspace-write' => '工作区内修改',
+        'danger-full-access' => '完全权限',
+        '' => '权限',
+        _ => preset,
+      };
 
-  /// 计划模式 chip（桌面 conversation.input.plan 座）。
-  Widget _planChip() {
-    return ActionChip(
-      avatar: Icon(Icons.map_outlined,
-          size: 16, color: _planActive ? Colors.lightBlueAccent : null),
-      label: Text(_planActive ? '计划中' : '计划',
-          style: const TextStyle(fontSize: 12)),
-      onPressed: _togglePlan,
-    );
-  }
-
-  /// 模型 chip（桌面 ModelSelect 座）。
-  Widget _modelChip() {
-    return ActionChip(
-      avatar: const Icon(Icons.tune, size: 16),
-      label: Text(
-        _modelLabel.isEmpty ? '模型' : _modelLabel,
-        style: const TextStyle(fontSize: 12),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      onPressed: _pickModel,
+  /// 输入框药丸内的紧凑图标按钮（32×40 视觉）。
+  Widget _composerIcon({
+    required IconData icon,
+    required String tooltip,
+    VoidCallback? onPressed,
+    Color? tint,
+  }) {
+    return IconButton(
+      onPressed: onPressed,
+      tooltip: tooltip,
+      icon: Icon(icon, size: 19, color: tint),
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 32, height: 40),
     );
   }
 
@@ -2057,6 +2043,7 @@ class _SessionPageState extends State<SessionPage> {
                   ),
                 );
               }
+              final scheme = Theme.of(context).colorScheme;
               return SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
@@ -2072,48 +2059,94 @@ class _SessionPageState extends State<SessionPage> {
                       if (_queueRows.isNotEmpty) _queueDock(),
                       // 斜杠命令面板（/ 命令名 token 未敲完时浮出候选）
                       if (_paletteQuery != null) _commandPalette(),
-                      // 输入行：[+]附件 [@]提及 | 输入框 | 发送
-                      Row(children: [
-                        IconButton(
-                          onPressed: _sending ? null : _pickFiles,
-                          tooltip: '附件',
-                          icon: const Icon(Icons.add_circle_outline),
+                      // 单输入框药丸：图标全部内嵌——左[附件][提及]，
+                      // 右[权限][计划][模型][发送]，中为无边框输入区。
+                      Container(
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(28),
+                          border: Border.all(color: scheme.outlineVariant),
                         ),
-                        IconButton(
-                          onPressed: _sending ? null : _pickReference,
-                          tooltip: '提及文件或对话',
-                          icon: const Icon(Icons.alternate_email),
-                        ),
-                        Expanded(
-                          child: TextField(
-                            controller: _inputCtrl,
-                            minLines: 1,
-                            maxLines: 5,
-                            decoration: InputDecoration(
-                              hintText: _placeholderText(),
-                              border: const OutlineInputBorder(),
-                              isDense: true,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 2),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            _composerIcon(
+                              icon: Icons.add_circle_outline,
+                              tooltip: '附件',
+                              onPressed: _sending ? null : _pickFiles,
                             ),
-                            onSubmitted: (_) => _send(),
-                          ),
+                            _composerIcon(
+                              icon: Icons.alternate_email,
+                              tooltip: '提及文件或对话',
+                              onPressed: _sending ? null : _pickReference,
+                            ),
+                            Expanded(
+                              child: TextField(
+                                controller: _inputCtrl,
+                                minLines: 1,
+                                maxLines: 5,
+                                decoration: InputDecoration(
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  hintText: _placeholderText(),
+                                  hintMaxLines: 1,
+                                  hintStyle: TextStyle(
+                                      fontSize: 13,
+                                      color: scheme.onSurfaceVariant),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 12, horizontal: 0),
+                                ),
+                                style: const TextStyle(fontSize: 15),
+                                onSubmitted: (_) => _send(),
+                              ),
+                            ),
+                            _composerIcon(
+                              icon: Icons.admin_panel_settings_outlined,
+                              tooltip: _permissionPreset.isEmpty
+                                  ? '权限'
+                                  : '权限：${_permissionLabel(_permissionPreset)}',
+                              tint: _permissionPreset.isEmpty
+                                  ? null
+                                  : scheme.primary,
+                              onPressed: _pickPermission,
+                            ),
+                            _composerIcon(
+                              icon: Icons.map_outlined,
+                              tooltip: _planActive ? '计划中（点击退出）' : '计划',
+                              tint: _planActive ? scheme.primary : null,
+                              onPressed: _togglePlan,
+                            ),
+                            _composerIcon(
+                              icon: Icons.tune,
+                              tooltip: _modelLabel.isEmpty
+                                  ? '模型'
+                                  : '模型：$_modelLabel',
+                              tint:
+                                  _modelLabel.isEmpty ? null : scheme.primary,
+                              onPressed: _pickModel,
+                            ),
+                            IconButton.filled(
+                              onPressed: _sending ? null : _send,
+                              tooltip: '发送',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints:
+                                  const BoxConstraints.tightFor(
+                                      width: 38, height: 38),
+                              iconSize: 18,
+                              icon: _sending
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2))
+                                  : const Icon(Icons.arrow_upward),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        IconButton.filled(
-                          onPressed: _sending ? null : _send,
-                          icon: _sending
-                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Icon(Icons.send),
-                        ),
-                      ]),
-                      const SizedBox(height: 6),
-                      // 配件行（对齐桌面 accessSelect / input.plan / input.model 三座）
-                      Row(children: [
-                        _accessChip(),
-                        const SizedBox(width: 6),
-                        _planChip(),
-                        const SizedBox(width: 6),
-                        Expanded(child: _modelChip()),
-                      ]),
+                      ),
                     ],
                   ),
                 ),
