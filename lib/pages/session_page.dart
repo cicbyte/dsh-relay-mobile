@@ -851,20 +851,58 @@ class _SessionPageState extends State<SessionPage> {
         _ => preset,
       };
 
-  /// 输入框药丸内的紧凑图标按钮（32×40 视觉）。
+  /// 输入卡内的图标+文字小药丸（参考 DeepSeek「深度思考/智能搜索」样式：
+  /// 默认描边灰、激活主题色底；长标签（模型名）截断）。
+  Widget _composerPill({
+    required IconData icon,
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = active ? scheme.primary : scheme.onSurfaceVariant;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: active ? scheme.primaryContainer : null,
+          border: Border.all(
+              color: active ? scheme.primary : scheme.outlineVariant),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 15, color: fg),
+          const SizedBox(width: 4),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: fg)),
+        ]),
+      ),
+    );
+  }
+
+  /// 输入卡右端的紧凑圆钮（自绘 InkWell：IconButton 的 constraints 会被
+  /// M3 样式撑回 40dp，实测挤爆底排——这里尺寸铁定）。
   Widget _composerIcon({
     required IconData icon,
     required String tooltip,
     VoidCallback? onPressed,
     Color? tint,
   }) {
-    return IconButton(
-      onPressed: onPressed,
-      tooltip: tooltip,
-      icon: Icon(icon, size: 19, color: tint),
-      visualDensity: VisualDensity.compact,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(width: 32, height: 40),
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 30,
+          height: 38,
+          child: Icon(icon, size: 19, color: tint),
+        ),
+      ),
     );
   }
 
@@ -2059,90 +2097,113 @@ class _SessionPageState extends State<SessionPage> {
                       if (_queueRows.isNotEmpty) _queueDock(),
                       // 斜杠命令面板（/ 命令名 token 未敲完时浮出候选）
                       if (_paletteQuery != null) _commandPalette(),
-                      // 单输入框药丸：图标全部内嵌——左[附件][提及]，
-                      // 右[权限][计划][模型][发送]，中为无边框输入区。
+                      // 输入卡（参考 DeepSeek 输入卡：大圆角卡、上文本区，
+                      // 下控制排——左图标+文字药丸，右圆钮[附件][提及][发送]）。
                       Container(
                         decoration: BoxDecoration(
                           color: scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(28),
+                          borderRadius: BorderRadius.circular(26),
                           border: Border.all(color: scheme.outlineVariant),
                         ),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 2),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
+                        padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            _composerIcon(
-                              icon: Icons.add_circle_outline,
-                              tooltip: '附件',
-                              onPressed: _sending ? null : _pickFiles,
-                            ),
-                            _composerIcon(
-                              icon: Icons.alternate_email,
-                              tooltip: '提及文件或对话',
-                              onPressed: _sending ? null : _pickReference,
-                            ),
-                            Expanded(
-                              child: TextField(
-                                controller: _inputCtrl,
-                                minLines: 1,
-                                maxLines: 5,
-                                decoration: InputDecoration(
-                                  border: InputBorder.none,
-                                  isDense: true,
-                                  hintText: _placeholderText(),
-                                  hintMaxLines: 1,
-                                  hintStyle: TextStyle(
-                                      fontSize: 13,
-                                      color: scheme.onSurfaceVariant),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 12, horizontal: 0),
-                                ),
-                                style: const TextStyle(fontSize: 15),
-                                onSubmitted: (_) => _send(),
+                            TextField(
+                              controller: _inputCtrl,
+                              minLines: 1,
+                              maxLines: 5,
+                              decoration: InputDecoration(
+                                border: InputBorder.none,
+                                isDense: true,
+                                hintText: _placeholderText(),
+                                hintMaxLines: 1,
+                                hintStyle: TextStyle(
+                                    fontSize: 15,
+                                    color: scheme.onSurfaceVariant),
+                                contentPadding:
+                                    const EdgeInsets.symmetric(vertical: 8),
                               ),
+                              style: const TextStyle(fontSize: 15),
+                              onSubmitted: (_) => _send(),
                             ),
-                            _composerIcon(
-                              icon: Icons.admin_panel_settings_outlined,
-                              tooltip: _permissionPreset.isEmpty
-                                  ? '权限'
-                                  : '权限：${_permissionLabel(_permissionPreset)}',
-                              tint: _permissionPreset.isEmpty
-                                  ? null
-                                  : scheme.primary,
-                              onPressed: _pickPermission,
-                            ),
-                            _composerIcon(
-                              icon: Icons.map_outlined,
-                              tooltip: _planActive ? '计划中（点击退出）' : '计划',
-                              tint: _planActive ? scheme.primary : null,
-                              onPressed: _togglePlan,
-                            ),
-                            _composerIcon(
-                              icon: Icons.tune,
-                              tooltip: _modelLabel.isEmpty
-                                  ? '模型'
-                                  : '模型：$_modelLabel',
-                              tint:
-                                  _modelLabel.isEmpty ? null : scheme.primary,
-                              onPressed: _pickModel,
-                            ),
-                            IconButton.filled(
-                              onPressed: _sending ? null : _send,
-                              tooltip: '发送',
-                              visualDensity: VisualDensity.compact,
-                              padding: EdgeInsets.zero,
-                              constraints:
-                                  const BoxConstraints.tightFor(
-                                      width: 38, height: 38),
-                              iconSize: 18,
-                              icon: _sending
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2))
-                                  : const Icon(Icons.arrow_upward),
+                            const SizedBox(height: 2),
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Tooltip(
+                                  message: _permissionPreset.isEmpty
+                                      ? '权限'
+                                      : '权限：${_permissionLabel(_permissionPreset)}',
+                                  child: _composerPill(
+                                    icon: Icons.admin_panel_settings_outlined,
+                                    label: '权限',
+                                    active: _permissionPreset.isNotEmpty,
+                                    onTap: _pickPermission,
+                                  ),
+                                ),
+                                Tooltip(
+                                  message:
+                                      _planActive ? '计划中（点击退出）' : '计划',
+                                  child: _composerPill(
+                                    icon: Icons.map_outlined,
+                                    label: '计划',
+                                    active: _planActive,
+                                    onTap: _togglePlan,
+                                  ),
+                                ),
+                                Tooltip(
+                                  message: _modelLabel.isEmpty
+                                      ? '模型'
+                                      : '模型：$_modelLabel',
+                                  child: _composerPill(
+                                    icon: Icons.tune,
+                                    label: '模型',
+                                    active: _modelLabel.isNotEmpty,
+                                    onTap: _pickModel,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                _composerIcon(
+                                  icon: Icons.add_circle_outline,
+                                  tooltip: '附件',
+                                  onPressed: _sending ? null : _pickFiles,
+                                ),
+                                _composerIcon(
+                                  icon: Icons.alternate_email,
+                                  tooltip: '提及文件或对话',
+                                  onPressed: _sending ? null : _pickReference,
+                                ),
+                                Tooltip(
+                                  message: '发送',
+                                  child: Material(
+                                    color: scheme.primary,
+                                    shape: const CircleBorder(),
+                                    child: InkWell(
+                                      customBorder: const CircleBorder(),
+                                      onTap: _sending ? null : _send,
+                                      child: SizedBox(
+                                        width: 34,
+                                        height: 34,
+                                        child: _sending
+                                            ? const Padding(
+                                                padding: EdgeInsets.all(9),
+                                                child:
+                                                    CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                        color: Colors.white),
+                                              )
+                                            : Icon(Icons.arrow_upward,
+                                                size: 18,
+                                                color: scheme.onPrimary),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
