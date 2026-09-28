@@ -63,8 +63,10 @@ class _ConnectPageState extends State<ConnectPage> {
   }
 
   Future<void> _saveAll() async {
+    // 只写盘不 _reload：保持 _profiles 与卡片/连接闭包的对象同一性
+    // （reload 会换新对象，后续 _connect 对 p 的配对结果写回会落在脱钩旧对象上丢盘）。
     await ProfileStore.save(_profiles);
-    await _reload();
+    if (mounted) setState(() {});
   }
 
   // ---------------- 连接 ----------------
