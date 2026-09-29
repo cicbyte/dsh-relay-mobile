@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DSH Mobile 皮肤原型（布局不变，纯换皮 ×4）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; background:#EDEFF4; color:#1B2437; }
+  .doc-head { position:sticky; top:0; z-index:99; background:rgba(255,255,255,.92); backdrop-filter:blur(12px);
+    border-bottom:1px solid #E3E7EF; padding:14px 28px; display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; }
+  .doc-head h1 { font-size:17px; }
+  .doc-head .nav a { font-size:13px; color:#4A5878; text-decoration:none; margin-right:16px; padding:4px 12px; border-radius:99px; background:#F0F3F9; }
+  .doc-head .nav a:hover { background:#4F6BED; color:#fff; }
+  .note { max-width:1280px; margin:20px auto 0; padding:0 28px; font-size:13px; color:#5A6A8C; line-height:1.8; }
+
+  .skin-section { max-width:1280px; margin:36px auto; padding:0 28px; }
+  .skin-title { display:flex; align-items:center; gap:14px; margin-bottom:6px; }
+  .skin-title h2 { font-size:22px; }
+  .skin-title .tag { font-size:12px; padding:3px 12px; border-radius:99px; color:#fff; }
+  .skin-desc { font-size:13px; color:#5A6A8C; margin-bottom:14px; line-height:1.8; }
+
+  .tokens { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+  .token { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #E3E7EF; border-radius:10px; padding:6px 12px; font-size:12px; color:#4A5878; }
+  .swatch { width:18px; height:18px; border-radius:6px; border:1px solid rgba(0,0,0,.08); }
+
+  .frames { display:flex; gap:28px; flex-wrap:wrap; }
+  .frame-wrap { display:flex; flex-direction:column; gap:8px; }
+  .frame-label { font-size:12px; color:#7A87A5; text-align:center; }
+  .phone { width:340px; height:720px; border-radius:38px; overflow:hidden; position:relative;
+    border:10px solid #10141D; box-shadow:0 18px 50px rgba(16,24,50,.22); }
+  .phone .screen { width:100%; height:100%; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+
+  /* ============ 通用布局骨架（四套皮肤共用，绝不改变） ============ */
+  .statusbar { height:30px; display:flex; justify-content:space-between; align-items:center; padding:0 18px; font-size:11px; flex:none; }
+  .appbar { height:52px; display:flex; align-items:center; padding:0 12px; gap:10px; flex:none; }
+  .appbar .ab-title { font-size:16px; font-weight:600; flex:1; }
+  .ic { width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; font-size:17px; }
+  .body { flex:1; overflow:hidden; display:flex; flex-direction:column; }
+
+  .status-strip { display:flex; align-items:center; gap:7px; padding:6px 16px; font-size:11px; }
+  .spin { width:11px; height:11px; border-radius:99px; border:2px solid currentColor; border-top-color:transparent; animation:sp 1s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+
+  .timeline { flex:1; overflow:hidden; padding:6px 14px; display:flex; flex-direction:column; gap:12px; }
+  .day-sep { text-align:center; font-size:11px; opacity:.55; }
+  .msg-user { align-self:flex-end; max-width:78%; padding:10px 14px; border-radius:16px 16px 4px 16px; font-size:13px; line-height:1.65; }
+  .msg-ai { display:flex; flex-direction:column; gap:7px; }
+  .ai-text { font-size:13px; line-height:1.75; }
+  .think-row { display:inline-flex; align-items:center; gap:6px; align-self:flex-start; font-size:11px; padding:5px 11px; border-radius:99px; }
+  .tool-row { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:12px; font-size:12px; }
+  .tool-row .ok { font-size:12px; }
+  .tool-cmd { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:ui-monospace,Consolas,monospace; font-size:11px; }
+  .tool-ms { font-size:10px; opacity:.6; }
+  .divider-load { text-align:center; font-size:11px; padding:4px 0; opacity:.55; }
+
+  .composer { flex:none; padding:8px 10px 14px; }
+  .composer .card { padding:10px 12px 8px; }
+  .fake-input { font-size:13px; padding:6px 2px 18px; }
+  .ctrl-row { display:flex; align-items:center; gap:7px; }
+  .pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; padding:6px 12px; border-radius:99px; }
+  .spacer { flex:1; }
+  .rbtn { width:32px; height:32px; border-radius:99px; display:inline-flex; align-items:center; justify-content:center; font-size:14px; }
+
+  /* 连接设置页 */
+  .form { flex:1; overflow:hidden; padding:12px 14px; display:flex; flex-direction:column; gap:11px; }
+  .f-label { font-size:11px; opacity:.65; margin:4px 2px 2px; }
+  .f-field { padding:12px 14px; border-radius:14px; font-size:13px; display:flex; align-items:center; gap:8px; }
+  .btn-main { padding:13px; border-radius:16px; text-align:center; font-size:14px; font-weight:600; color:#fff; }
+  .btn-ghost { padding:12px; border-radius:16px; text-align:center; font-size:13px; }
+  .server-card { padding:11px 14px; border-radius:14px; display:flex; align-items:center; gap:10px; }
+  .server-card .s-name { font-size:13px; font-weight:600; }
+  .server-card .s-host { font-size:11px; opacity:.6; }
+  .conn-badge { margin-left:auto; font-size:10px; padding:3px 10px; border-radius:99px; }
+
+  /* 抽屉 */
+  .drawer { position:absolute; inset:0; display:flex; }
+  .drawer .panel { width:74%; height:100%; padding:44px 14px 14px; display:flex; flex-direction:column; gap:8px; overflow:hidden; }
+  .drawer .scrim { flex:1; }
+  .d-head { font-size:15px; font-weight:700; padding:6px 10px 12px; }
+  .d-new { padding:11px 14px; border-radius:13px; font-size:13px; font-weight:600; text-align:center; margin-bottom:6px; }
+  .d-item { padding:10px 12px; border-radius:11px; font-size:12.5px; display:flex; align-items:center; gap:8px; }
+  .d-item .d-sub { font-size:10px; opacity:.55; }
+  .d-dot { width:7px; height:7px; border-radius:99px; background:#22C55E; }
+
+  /* ============ 皮肤 A：深空玻璃 Dark Glass ============ */
+  .sk-a .screen { background:linear-gradient(180deg,#0B1326 0%,#0E1A33 55%,#0B1428 100%); color:#E9EFFA; }
+  .sk-a .statusbar { color:#8FA5CC; }
+  .sk-a .appbar { background:rgba(255,255,255,.03); border-bottom:1px solid rgba(255,255,255,.07); }
+  .sk-a .msg-user { background:linear-gradient(135deg,#3E63F4,#4C8DFF); color:#fff; box-shadow:0 6px 18px rgba(62,99,244,.35); }
+  .sk-a .think-row { background:rgba(255,255,255,.07); color:#A9BCE0; border:1px solid rgba(255,255,255,.08); }
+  .sk-a .tool-row { background:rgba(255,255,255,.055); border:1px solid rgba(255,255,255,.08); color:#C6D4EE; }
+  .sk-a .tool-row .ok { color:#4ADE80; }
+  .sk-a .status-strip { color:#6EA8FF; }
+  .sk-a .composer .card { background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.10); border-radius:24px; backdrop-filter:blur(18px); }
+  .sk-a .fake-input { color:#8FA5CC; }
+  .sk-a .pill { background:rgba(255,255,255,.08); color:#BFD0EC; border:1px solid rgba(255,255,255,.09); }
+  .sk-a .rbtn { background:rgba(255,255,255,.09); color:#CBD9F2; }
+  .sk-a .rbtn.send { background:linear-gradient(135deg,#3E63F4,#4CC2FF); color:#fff; box-shadow:0 4px 14px rgba(76,140,255,.5); }
+  .sk-a .f-field { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.09); color:#DDE7F8; }
+  .sk-a .btn-main { background:linear-gradient(135deg,#3E63F4,#4CC2FF); box-shadow:0 8px 22px rgba(62,99,244,.4); }
+  .sk-a .btn-ghost { background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.1); color:#C6D4EE; }
+  .sk-a .server-card { background:rgba(255,255,255,.055); border:1px solid rgba(255,255,255,.08); }
+  .sk-a .conn-badge { background:rgba(74,222,128,.16); color:#4ADE80; }
+  .sk-a .drawer .panel { background:rgba(13,22,44,.97); border-right:1px solid rgba(255,255,255,.08); backdrop-filter:blur(20px); }
+  .sk-a .drawer .scrim { background:rgba(0,0,0,.55); }
+  .sk-a .d-new { background:linear-gradient(135deg,#3E63F4,#4C8DFF); color:#fff; }
+  .sk-a .d-item { color:#C6D4EE; }
+  .sk-a .d-item.active { background:rgba(76,140,255,.16); color:#fff; }
+  .sk-a .divider-load, .sk-a .day-sep { color:#7E93B8; }
+
+  /* ============ 皮肤 B：晨白 Clean Light ============ */
+  .sk-b .screen { background:#F4F6FB; color:#1B2437; }
+  .sk-b .statusbar { color:#8A94AC; }
+  .sk-b .appbar { background:#FFFFFF; border-bottom:1px solid #E7EBF3; }
+  .sk-b .ab-title { color:#17233F; }
+  .sk-b .msg-user { background:#3B6EF6; color:#fff; box-shadow:0 4px 12px rgba(59,110,246,.22); }
+  .sk-b .think-row { background:#EDF1FA; color:#5A6A8C; }
+  .sk-b .tool-row { background:#FFFFFF; border:1px solid #E7EBF3; box-shadow:0 1px 4px rgba(23,43,99,.05); color:#46536F; }
+  .sk-b .tool-row .ok { color:#16A34A; }
+  .sk-b .status-strip { color:#3B6EF6; }
+  .sk-b .composer .card { background:#FFFFFF; border:1px solid #E7EBF3; border-radius:24px; box-shadow:0 6px 22px rgba(23,43,99,.08); }
+  .sk-b .fake-input { color:#98A2B8; }
+  .sk-b .pill { background:#F0F3FA; color:#46536F; }
+  .sk-b .rbtn { background:#F0F3FA; color:#46536F; }
+  .sk-b .rbtn.send { background:#3B6EF6; color:#fff; box-shadow:0 4px 12px rgba(59,110,246,.3); }
+  .sk-b .f-field { background:#fff; border:1px solid #E2E7F1; }
+  .sk-b .btn-main { background:#3B6EF6; box-shadow:0 6px 16px rgba(59,110,246,.25); }
+  .sk-b .btn-ghost { background:#fff; border:1px solid #E2E7F1; color:#46536F; }
+  .sk-b .server-card { background:#fff; border:1px solid #E7EBF3; box-shadow:0 1px 4px rgba(23,43,99,.05); }
+  .sk-b .conn-badge { background:#E7F7EC; color:#16A34A; }
+  .sk-b .drawer .panel { background:#FFFFFF; box-shadow:8px 0 30px rgba(23,43,99,.12); }
+  .sk-b .drawer .scrim { background:rgba(27,36,55,.38); }
+  .sk-b .d-new { background:#3B6EF6; color:#fff; }
+  .sk-b .d-item { color:#46536F; }
+  .sk-b .d-item.active { background:#EDF2FE; color:#264FCF; font-weight:600; }
+
+  /* ============ 皮肤 C：鲸蓝 Brand Splash ============ */
+  .sk-c .screen { background:#F6F8FE; color:#152347; }
+  .sk-c .statusbar { color:#fff; background:linear-gradient(120deg,#4F6BED,#38BDF8); height:34px; }
+  .sk-c .appbar { background:linear-gradient(120deg,#4F6BED,#38BDF8); color:#fff; border-radius:0 0 22px 22px; height:58px; box-shadow:0 8px 22px rgba(79,107,237,.32); }
+  .sk-c .ab-title { color:#fff; }
+  .sk-c .msg-user { background:linear-gradient(135deg,#4F6BED,#38BDF8); color:#fff; border-radius:20px 20px 6px 20px; box-shadow:0 6px 18px rgba(79,107,237,.30); }
+  .sk-c .think-row { background:#EAF1FF; color:#3D5BB5; }
+  .sk-c .tool-row { background:#fff; border:1px solid #E4EBFB; border-radius:14px; color:#3B4E7E; box-shadow:0 2px 8px rgba(79,107,237,.07); }
+  .sk-c .tool-row .ok { color:#0EA5E9; }
+  .sk-c .status-strip { color:#38BDF8; }
+  .sk-c .composer .card { background:#fff; border:none; border-radius:26px; box-shadow:0 10px 30px rgba(79,107,237,.16); }
+  .sk-c .fake-input { color:#93A3D4; }
+  .sk-c .pill { background:#EDF2FF; color:#3D5BB5; }
+  .sk-c .rbtn { background:#EDF2FF; color:#3D5BB5; }
+  .sk-c .rbtn.send { background:linear-gradient(135deg,#4F6BED,#38BDF8); color:#fff; width:38px; height:38px; box-shadow:0 6px 16px rgba(79,107,237,.4); }
+  .sk-c .f-field { background:#fff; border:1px solid #E4EBFB; border-radius:16px; }
+  .sk-c .btn-main { background:linear-gradient(120deg,#4F6BED,#38BDF8); border-radius:18px; box-shadow:0 8px 20px rgba(79,107,237,.32); }
+  .sk-c .btn-ghost { background:#fff; border:1px solid #DCE5FA; color:#3D5BB5; border-radius:18px; }
+  .sk-c .server-card { background:#fff; border:1px solid #E4EBFB; border-radius:16px; }
+  .sk-c .conn-badge { background:#E0F2FE; color:#0284C7; }
+  .sk-c .drawer .panel { background:linear-gradient(160deg,#4F6BED,#3F7DE0); color:#fff; }
+  .sk-c .drawer .scrim { background:rgba(21,35,71,.45); }
+  .sk-c .d-new { background:rgba(255,255,255,.18); color:#fff; border:1px solid rgba(255,255,255,.35); }
+  .sk-c .d-item { color:#EAF0FF; }
+  .sk-c .d-item.active { background:rgba(255,255,255,.22); color:#fff; font-weight:600; }
+
+  /* ============ 皮肤 D：墨白 Mono Pro ============ */
+  .sk-d .screen { background:#FAFAFA; color:#141414; }
+  .sk-d .statusbar { color:#8A8A8A; }
+  .sk-d .appbar { background:#FFFFFF; border-bottom:1px solid #E6E6E6; }
+  .sk-d .ab-title { font-weight:700; letter-spacing:.2px; }
+  .sk-d .msg-user { background:#141414; color:#fff; border-radius:10px 10px 3px 10px; }
+  .sk-d .think-row { background:#F0F0F0; color:#5C5C5C; border:1px solid #E2E2E2; border-radius:8px; }
+  .sk-d .tool-row { background:#fff; border:1px solid #E6E6E6; border-radius:9px; color:#3A3A3A; }
+  .sk-d .tool-row .ok { color:#16A34A; }
+  .sk-d .tool-cmd { color:#8A5CF6; }
+  .sk-d .status-strip { color:#B45309; }
+  .sk-d .composer .card { background:#fff; border:1.5px solid #141414; border-radius:12px; }
+  .sk-d .fake-input { color:#9A9A9A; }
+  .sk-d .pill { background:#F2F2F2; color:#3A3A3A; border:1px solid #E2E2E2; border-radius:8px; }
+  .sk-d .rbtn { background:#F2F2F2; color:#3A3A3A; border-radius:9px; }
+  .sk-d .rbtn.send { background:#2563EB; color:#fff; border-radius:9px; }
+  .sk-d .f-field { background:#fff; border:1px solid #DADADA; border-radius:9px; }
+  .sk-d .btn-main { background:#141414; border-radius:10px; letter-spacing:1px; }
+  .sk-d .btn-ghost { background:#fff; border:1px solid #DADADA; color:#141414; border-radius:10px; }
+  .sk-d .server-card { background:#fff; border:1px solid #E6E6E6; border-radius:9px; }
+  .sk-d .conn-badge { background:#EDF7EE; color:#166534; }
+  .sk-d .drawer .panel { background:#FFFFFF; border-right:1.5px solid #141414; }
+  .sk-d .drawer .scrim { background:rgba(20,20,20,.42); }
+  .sk-d .d-new { background:#141414; color:#fff; border-radius:9px; }
+  .sk-d .d-item { color:#3A3A3A; border-radius:8px; }
+  .sk-d .d-item.active { background:#141414; color:#fff; }
+  .sk-d .f-label { letter-spacing:.5px; text-transform:uppercase; font-size:10px; }
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>DSH Mobile · 皮肤原型</h1>
+  <div class="nav">
+    <a href="#sk-a">A 深空玻璃</a>
+    <a href="#sk-b">B 晨白</a>
+    <a href="#sk-c">C 鲸蓝</a>
+    <a href="#sk-d">D 墨白</a>
+  </div>
+</div>
+
+<div class="note">
+  原则：<b>布局零改动</b>——同一套页面骨架（顶栏 / 状态行 / 时间线 / 输入卡 / 表单 / 抽屉），只换皮肤令牌（色彩 · 圆角 · 阴影 · 材质 · 字重）。
+  每套皮肤三屏：<b>会话页</b>（主屏）、<b>连接设置</b>、<b>抽屉导航</b>。选中后直接落 Flutter ThemeData + 组件级令牌。
+</div>
+
+<!-- ================= A ================= -->
+<section class="skin-section" id="sk-a">
+  <div class="skin-title"><h2>A · 深空玻璃</h2><span class="tag" style="background:#3E63F4">Dark Glass</span></div>
+  <div class="skin-desc">深空蓝渐变底 + 玻璃拟态卡片（半透明 + 背景模糊）+ 蓝→青渐变强调。高级、耐看、夜里不刺眼，工具流「专业终端」气质；闪动的绿色状态点和青蓝辉光点缀呼吸感。</div>
+  <div class="tokens">
+    <div class="token"><span class="swatch" style="background:#0B1326"></span>底 #0B1326→#0E1A33</div>
+    <div class="token"><span class="swatch" style="background:rgba(255,255,255,.14)"></span>玻璃卡 rgba(白,6~7%) + blur</div>
+    <div class="token"><span class="swatch" style="background:linear-gradient(135deg,#3E63F4,#4CC2FF)"></span>强调 #3E63F4→#4CC2FF</div>
+    <div class="token"><span class="swatch" style="background:#4ADE80"></span>成功 #4ADE80</div>
+    <div class="token">圆角 12/16/24 · 辉光阴影 · 主文 #E9EFFA / 次文 #8FA5CC</div>
+  </div>
+  <div class="frames">
+    <div class="frame-wrap"><div class="phone sk-a"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">对接 relay 配置调整</span><span class="ic">◷</span><span class="ic">⋮</span></div>
+      <div class="body">
+        <div class="status-strip"><span class="spin"></span>深度求索中… 1m12s</div>
+        <div class="timeline">
+          <div class="day-sep">今天 12:40</div>
+          <div class="msg-user">帮我把 relay 的限流再收紧一点</div>
+          <div class="msg-ai">
+            <div class="think-row">🧠 思考过程（930 字）⌄</div>
+            <div class="tool-row"><span class="ok">✓</span><span class="tool-cmd">pwsh command=bcode claim 856 …</span><span class="tool-ms">752ms</span><span>⌄</span></div>
+            <div class="tool-row"><span class="ok">✓</span><span class="tool-cmd">grep pattern=ColorScheme|ThemeData|seed…</span><span class="tool-ms">96ms</span><span>⌄</span></div>
+            <div class="ai-text">已认领 #856。主题是 M3 默认蓝紫 seed——「丑」的根源多半在此，先出 4 套皮肤原型……</div>
+          </div>
+          <div class="msg-user">好，先看 HTML 原型</div>
+          <div class="divider-load">加载更早的消息</div>
+        </div>
+        <div class="composer"><div class="card">
+          <div class="fake-input">输入消息…</div>
+          <div class="ctrl-row">
+            <span class="pill">🛡 权限 ⌄</span><span class="pill">🗂 计划</span><span class="pill">⚙ 模型</span>
+            <span class="spacer"></span>
+            <span class="rbtn">＋</span><span class="rbtn">@</span><span class="rbtn send">↑</span>
+          </div>
+        </div></div>
+      </div>
+    </div></div><div class="frame-label">会话页</div></div>
+
+    <div class="frame-wrap"><div class="phone sk-a"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">连接设置</span><span class="ic">▦</span><span class="ic">⋮</span></div>
+      <div class="form">
+        <div class="f-label">RELAY 地址</div>
+        <div class="f-field">🌐 ws://192.168.142.1:8787</div>
+        <div class="f-label">配对码</div>
+        <div class="f-field">🔑 test-code-123456</div>
+        <div class="f-label">设备名</div>
+        <div class="f-field">📱 MuMuTest</div>
+        <div class="btn-main">连接并配对</div>
+        <div class="btn-ghost">扫码入网</div>
+        <div class="f-label">已知服务</div>
+        <div class="server-card"><span class="ic">💻</span><div><div class="s-name">书房工作站</div><div class="s-host">192.168.142.1:8787</div></div><span class="conn-badge">在线</span></div>
+        <div class="server-card"><span class="ic">💻</span><div><div class="s-name">公司测试机</div><div class="s-host">10.8.0.2:8787</div></div><span class="conn-badge" style="background:rgba(255,255,255,.1);color:#8FA5CC">离线</span></div>
+      </div>
+    </div></div><div class="frame-label">连接设置</div></div>
+
+    <div class="frame-wrap"><div class="phone sk-a"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">对接 relay 配置调整</span></div>
+      <div class="body"><div class="timeline"></div></div>
+      <div class="drawer">
+        <div class="panel">
+          <div class="d-head">DSH Mobile</div>
+          <div class="d-new">＋ 新建会话</div>
+          <div class="d-item active"><div>对接 relay 配置调整<div class="d-sub">12:40 · 运行中</div></div><span class="d-dot"></span></div>
+          <div class="d-item"><div>手机端皮肤原型<div class="d-sub">昨天</div></div></div>
+          <div class="d-item"><div>多用户隔离回归<div class="d-sub">9月28日</div></div></div>
+          <div class="d-item"><div>连续性测试排障<div class="d-sub">9月27日</div></div></div>
+        </div>
+        <div class="scrim"></div>
+      </div>
+    </div></div><div class="frame-label">抽屉导航</div></div>
+  </div>
+</section>
+
+<!-- ================= B ================= -->
+<section class="skin-section" id="sk-b">
+  <div class="skin-title"><h2>B · 晨白</h2><span class="tag" style="background:#3B6EF6">Clean Light</span></div>
+  <div class="skin-desc">清爽白底 + 纯白卡片轻投影 + 克制的蓝。信息层级靠留白和浅灰面（#F0F3FA）区分，最不容易看腻的一套；输入卡和工具行带柔和投影，通勤/白天强光下最清楚。</div>
+  <div class="tokens">
+    <div class="token"><span class="swatch" style="background:#F4F6FB"></span>底 #F4F6FB</div>
+    <div class="token"><span class="swatch" style="background:#FFFFFF"></span>卡 #FFF + 0 1~6px 轻投影</div>
+    <div class="token"><span class="swatch" style="background:#3B6EF6"></span>强调 #3B6EF6</div>
+    <div class="token"><span class="swatch" style="background:#F0F3FA"></span>次级面 #F0F3FA</div>
+    <div class="token">圆角 14/16/24 · 主文 #1B2437 / 次文 #46536F</div>
+  </div>
+  <div class="frames">
+    <div class="frame-wrap"><div class="phone sk-b"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">对接 relay 配置调整</span><span class="ic">◷</span><span class="ic">⋮</span></div>
+      <div class="body">
+        <div class="status-strip"><span class="spin"></span>深度求索中… 1m12s</div>
+        <div class="timeline">
+          <div class="day-sep">今天 12:40</div>
+          <div class="msg-user">帮我把 relay 的限流再收紧一点</div>
+          <div class="msg-ai">
+            <div class="think-row">🧠 思考过程（930 字）⌄</div>
+            <div class="tool-row"><span class="ok">✓</span><span class="tool-cmd">pwsh command=bcode claim 856 …</span><span class="tool-ms">752ms</span><span>⌄</span></div>
+            <div class="tool-row"><span class="ok">✓</span><span class="tool-cmd">grep pattern=ColorScheme|ThemeData|seed…</span><span class="tool-ms">96ms</span><span>⌄</span></div>
+            <div class="ai-text">已认领 #856。主题是 M3 默认蓝紫 seed——「丑」的根源多半在此，先出 4 套皮肤原型……</div>
+          </div>
+          <div class="msg-user">好，先看 HTML 原型</div>
+          <div class="divider-load">加载更早的消息</div>
+        </div>
+        <div class="composer"><div class="card">
+          <div class="fake-input">输入消息…</div>
+          <div class="ctrl-row">
+            <span class="pill">🛡 权限 ⌄</span><span class="pill">🗂 计划</span><span class="pill">⚙ 模型</span>
+            <span class="spacer"></span>
+            <span class="rbtn">＋</span><span class="rbtn">@</span><span class="rbtn send">↑</span>
+          </div>
+        </div></div>
+      </div>
+    </div></div><div class="frame-label">会话页</div></div>
+
+    <div class="frame-wrap"><div class="phone sk-b"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">连接设置</span><span class="ic">▦</span><span class="ic">⋮</span></div>
+      <div class="form">
+        <div class="f-label">RELAY 地址</div>
+        <div class="f-field">🌐 ws://192.168.142.1:8787</div>
+        <div class="f-label">配对码</div>
+        <div class="f-field">🔑 test-code-123456</div>
+        <div class="f-label">设备名</div>
+        <div class="f-field">📱 MuMuTest</div>
+        <div class="btn-main">连接并配对</div>
+        <div class="btn-ghost">扫码入网</div>
+        <div class="f-label">已知服务</div>
+        <div class="server-card"><span class="ic">💻</span><div><div class="s-name">书房工作站</div><div class="s-host">192.168.142.1:8787</div></div><span class="conn-badge">在线</span></div>
+        <div class="server-card"><span class="ic">💻</span><div><div class="s-name">公司测试机</div><div class="s-host">10.8.0.2:8787</div></div><span class="conn-badge" style="background:#F2F2F2;color:#8A8A8A">离线</span></div>
+      </div>
+    </div></div><div class="frame-label">连接设置</div></div>
+
+    <div class="frame-wrap"><div class="phone sk-b"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">对接 relay 配置调整</span></div>
+      <div class="body"><div class="timeline"></div></div>
+      <div class="drawer">
+        <div class="panel">
+          <div class="d-head">DSH Mobile</div>
+          <div class="d-new">＋ 新建会话</div>
+          <div class="d-item active"><div>对接 relay 配置调整<div class="d-sub">12:40 · 运行中</div></div><span class="d-dot"></span></div>
+          <div class="d-item"><div>手机端皮肤原型<div class="d-sub">昨天</div></div></div>
+          <div class="d-item"><div>多用户隔离回归<div class="d-sub">9月28日</div></div></div>
+          <div class="d-item"><div>连续性测试排障<div class="d-sub">9月27日</div></div></div>
+        </div>
+        <div class="scrim"></div>
+      </div>
+    </div></div><div class="frame-label">抽屉导航</div></div>
+  </div>
+</section>
+
+<!-- ================= C ================= -->
+<section class="skin-section" id="sk-c">
+  <div class="skin-title"><h2>C · 鲸蓝</h2><span class="tag" style="background:linear-gradient(120deg,#4F6BED,#38BDF8)">Brand Splash</span></div>
+  <div class="skin-desc">品牌色打满：鲸鱼蓝→天青渐变的顶栏与主按钮，抽屉整片渐变，圆角最大（18~26）、投影带色，最活泼亲和的一套；和 dsh 鲸鱼图标同族色，品牌感最强。</div>
+  <div class="tokens">
+    <div class="token"><span class="swatch" style="background:#F6F8FE"></span>底 #F6F8FE</div>
+    <div class="token"><span class="swatch" style="background:linear-gradient(120deg,#4F6BED,#38BDF8)"></span>品牌渐变 #4F6BED→#38BDF8</div>
+    <div class="token"><span class="swatch" style="background:#FFFFFF"></span>卡 #FFF 无边框大投影</div>
+    <div class="token">圆角 16/20/26 · 带色投影 · 主文 #152347</div>
+  </div>
+  <div class="frames">
+    <div class="frame-wrap"><div class="phone sk-c"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">对接 relay 配置调整</span><span class="ic">◷</span><span class="ic">⋮</span></div>
+      <div class="body">
+        <div class="status-strip"><span class="spin"></span>深度求索中… 1m12s</div>
+        <div class="timeline">
+          <div class="day-sep">今天 12:40</div>
+          <div class="msg-user">帮我把 relay 的限流再收紧一点</div>
+          <div class="msg-ai">
+            <div class="think-row">🧠 思考过程（930 字）⌄</div>
+            <div class="tool-row"><span class="ok">✓</span><span class="tool-cmd">pwsh command=bcode claim 856 …</span><span class="tool-ms">752ms</span><span>⌄</span></div>
+            <div class="tool-row"><span class="ok">✓</span><span class="tool-cmd">grep pattern=ColorScheme|ThemeData|seed…</span><span class="tool-ms">96ms</span><span>⌄</span></div>
+            <div class="ai-text">已认领 #856。主题是 M3 默认蓝紫 seed——「丑」的根源多半在此，先出 4 套皮肤原型……</div>
+          </div>
+          <div class="msg-user">好，先看 HTML 原型</div>
+          <div class="divider-load">加载更早的消息</div>
+        </div>
+        <div class="composer"><div class="card">
+          <div class="fake-input">输入消息…</div>
+          <div class="ctrl-row">
+            <span class="pill">🛡 权限 ⌄</span><span class="pill">🗂 计划</span><span class="pill">⚙ 模型</span>
+            <span class="spacer"></span>
+            <span class="rbtn">＋</span><span class="rbtn">@</span><span class="rbtn send">↑</span>
+          </div>
+        </div></div>
+      </div>
+    </div></div><div class="frame-label">会话页</div></div>
+
+    <div class="frame-wrap"><div class="phone sk-c"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">连接设置</span><span class="ic">▦</span><span class="ic">⋮</span></div>
+      <div class="form">
+        <div class="f-label">RELAY 地址</div>
+        <div class="f-field">🌐 ws://192.168.142.1:8787</div>
+        <div class="f-label">配对码</div>
+        <div class="f-field">🔑 test-code-123456</div>
+        <div class="f-label">设备名</div>
+        <div class="f-field">📱 MuMuTest</div>
+        <div class="btn-main">连接并配对</div>
+        <div class="btn-ghost">扫码入网</div>
+        <div class="f-label">已知服务</div>
+        <div class="server-card"><span class="ic">💻</span><div><div class="s-name">书房工作站</div><div class="s-host">192.168.142.1:8787</div></div><span class="conn-badge">在线</span></div>
+        <div class="server-card"><span class="ic">💻</span><div><div class="s-name">公司测试机</div><div class="s-host">10.8.0.2:8787</div></div><span class="conn-badge" style="background:#F2F2F2;color:#8A8A8A">离线</span></div>
+      </div>
+    </div></div><div class="frame-label">连接设置</div></div>
+
+    <div class="frame-wrap"><div class="phone sk-c"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">对接 relay 配置调整</span></div>
+      <div class="body"><div class="timeline"></div></div>
+      <div class="drawer">
+        <div class="panel">
+          <div class="d-head">DSH Mobile</div>
+          <div class="d-new">＋ 新建会话</div>
+          <div class="d-item active"><div>对接 relay 配置调整<div class="d-sub">12:40 · 运行中</div></div><span class="d-dot"></span></div>
+          <div class="d-item"><div>手机端皮肤原型<div class="d-sub">昨天</div></div></div>
+          <div class="d-item"><div>多用户隔离回归<div class="d-sub">9月28日</div></div></div>
+          <div class="d-item"><div>连续性测试排障<div class="d-sub">9月27日</div></div></div>
+        </div>
+        <div class="scrim"></div>
+      </div>
+    </div></div><div class="frame-label">抽屉导航</div></div>
+  </div>
+</section>
+
+<!-- ================= D ================= -->
+<section class="skin-section" id="sk-d">
+  <div class="skin-title"><h2>D · 墨白</h2><span class="tag" style="background:#141414">Mono Pro</span></div>
+  <div class="skin-desc">黑白灰高对比 + 描边代替投影 + 小圆角紧排版，蓝色只出现在可点的动作上。最「工程工具」气质的一套（Linear / Vercel 风），信息密度最高、最不花哨；命令行文本用紫强调，扫描性极强。</div>
+  <div class="tokens">
+    <div class="token"><span class="swatch" style="background:#FAFAFA"></span>底 #FAFAFA</div>
+    <div class="token"><span class="swatch" style="background:#FFFFFF"></span>卡 #FFF + 1px #E6E6E6 描边</div>
+    <div class="token"><span class="swatch" style="background:#141414"></span>主墨 #141414</div>
+    <div class="token"><span class="swatch" style="background:#2563EB"></span>动作蓝 #2563EB（仅按钮）</div>
+    <div class="token">圆角 8~12 · 无投影 · 字距 +0.2~1px</div>
+  </div>
+  <div class="frames">
+    <div class="frame-wrap"><div class="phone sk-d"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">对接 relay 配置调整</span><span class="ic">◷</span><span class="ic">⋮</span></div>
+      <div class="body">
+        <div class="status-strip"><span class="spin"></span>深度求索中… 1m12s</div>
+        <div class="timeline">
+          <div class="day-sep">今天 12:40</div>
+          <div class="msg-user">帮我把 relay 的限流再收紧一点</div>
+          <div class="msg-ai">
+            <div class="think-row">🧠 思考过程（930 字）⌄</div>
+            <div class="tool-row"><span class="ok">✓</span><span class="tool-cmd">pwsh command=bcode claim 856 …</span><span class="tool-ms">752ms</span><span>⌄</span></div>
+            <div class="tool-row"><span class="ok">✓</span><span class="tool-cmd">grep pattern=ColorScheme|ThemeData|seed…</span><span class="tool-ms">96ms</span><span>⌄</span></div>
+            <div class="ai-text">已认领 #856。主题是 M3 默认蓝紫 seed——「丑」的根源多半在此，先出 4 套皮肤原型……</div>
+          </div>
+          <div class="msg-user">好，先看 HTML 原型</div>
+          <div class="divider-load">加载更早的消息</div>
+        </div>
+        <div class="composer"><div class="card">
+          <div class="fake-input">输入消息…</div>
+          <div class="ctrl-row">
+            <span class="pill">🛡 权限 ⌄</span><span class="pill">🗂 计划</span><span class="pill">⚙ 模型</span>
+            <span class="spacer"></span>
+            <span class="rbtn">＋</span><span class="rbtn">@</span><span class="rbtn send">↑</span>
+          </div>
+        </div></div>
+      </div>
+    </div></div><div class="frame-label">会话页</div></div>
+
+    <div class="frame-wrap"><div class="phone sk-d"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">连接设置</span><span class="ic">▦</span><span class="ic">⋮</span></div>
+      <div class="form">
+        <div class="f-label">RELAY 地址</div>
+        <div class="f-field">🌐 ws://192.168.142.1:8787</div>
+        <div class="f-label">配对码</div>
+        <div class="f-field">🔑 test-code-123456</div>
+        <div class="f-label">设备名</div>
+        <div class="f-field">📱 MuMuTest</div>
+        <div class="btn-main">连接并配对</div>
+        <div class="btn-ghost">扫码入网</div>
+        <div class="f-label">已知服务</div>
+        <div class="server-card"><span class="ic">💻</span><div><div class="s-name">书房工作站</div><div class="s-host">192.168.142.1:8787</div></div><span class="conn-badge">在线</span></div>
+        <div class="server-card"><span class="ic">💻</span><div><div class="s-name">公司测试机</div><div class="s-host">10.8.0.2:8787</div></div><span class="conn-badge" style="background:#F2F2F2;color:#8A8A8A">离线</span></div>
+      </div>
+    </div></div><div class="frame-label">连接设置</div></div>
+
+    <div class="frame-wrap"><div class="phone sk-d"><div class="screen">
+      <div class="statusbar"><span>12:52</span><span>￮￮￮ 100%</span></div>
+      <div class="appbar"><span class="ic">☰</span><span class="ab-title">对接 relay 配置调整</span></div>
+      <div class="body"><div class="timeline"></div></div>
+      <div class="drawer">
+        <div class="panel">
+          <div class="d-head">DSH MOBILE</div>
+          <div class="d-new">＋ 新建会话</div>
+          <div class="d-item active"><div>对接 relay 配置调整<div class="d-sub">12:40 · 运行中</div></div><span class="d-dot"></span></div>
+          <div class="d-item"><div>手机端皮肤原型<div class="d-sub">昨天</div></div></div>
+          <div class="d-item"><div>多用户隔离回归<div class="d-sub">9月28日</div></div></div>
+          <div class="d-item"><div>连续性测试排障<div class="d-sub">9月27日</div></div></div>
+        </div>
+        <div class="scrim"></div>
+      </div>
+    </div></div><div class="frame-label">抽屉导航</div></div>
+  </div>
+</section>
+
+</body>
+</html>
