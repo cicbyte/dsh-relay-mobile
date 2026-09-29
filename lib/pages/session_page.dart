@@ -476,7 +476,7 @@ class _SessionPageState extends State<SessionPage> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(children: [
-        const Icon(Icons.flag_outlined, size: 14, color: Colors.pinkAccent),
+        Icon(Icons.flag_outlined, size: 14, color: Acc.pink(context)),
         const SizedBox(width: 6),
         Expanded(
           child: Text(_goalObjective,
@@ -615,7 +615,7 @@ class _SessionPageState extends State<SessionPage> {
                 Text(placeLabel,
                     style: TextStyle(
                         fontSize: 10,
-                        color: Colors.amberAccent,
+                        color: Acc.amber(context),
                         fontWeight: FontWeight.w600)),
               Text(text.isEmpty ? '（附件消息）' : text,
                   maxLines: 2,
@@ -1217,7 +1217,7 @@ class _SessionPageState extends State<SessionPage> {
                             : Icons.warning_amber_outlined,
                         size: 18,
                         color: isChild
-                            ? (running ? Colors.greenAccent : scheme.onSurfaceVariant)
+                            ? (running ? Acc.green(context) : scheme.onSurfaceVariant)
                             : scheme.error,
                       ),
                       title: Text(
@@ -1613,8 +1613,8 @@ class _SessionPageState extends State<SessionPage> {
                       },
                       size: 13,
                       color: switch ('${t['status'] ?? ''}') {
-                        'completed' => Colors.greenAccent,
-                        'in_progress' => Colors.amberAccent,
+                        'completed' => Acc.green(context),
+                        'in_progress' => Acc.amber(context),
                         _ => scheme.onSurfaceVariant,
                       },
                     ),
@@ -1675,7 +1675,7 @@ class _SessionPageState extends State<SessionPage> {
         final active = r.data['active'] == true;
         return _chipTile(
             icon: Icons.map_outlined,
-            color: Colors.lightBlueAccent,
+            color: Acc.lightBlue(context),
             text: active ? '计划模式 · 开启' : '计划模式 · 关闭');
       // ---- 询问 / 授权 ----
       case 'approval/asked':
@@ -1683,7 +1683,7 @@ class _SessionPageState extends State<SessionPage> {
         final reason = '${r.data['reason'] ?? ''}';
         return _chipTile(
             icon: Icons.lock_outline,
-            color: Colors.orangeAccent,
+            color: Acc.orange(context),
             text: '授权询问 · $tool',
             sub: reason.isEmpty ? '等待授权' : reason);
       case 'approval/decided':
@@ -1698,14 +1698,14 @@ class _SessionPageState extends State<SessionPage> {
         final ok = outcome == 'allowed-once';
         return _chipTile(
             icon: ok ? Icons.lock_open_outlined : Icons.block_outlined,
-            color: ok ? Colors.greenAccent : scheme.error,
+            color: ok ? Acc.green(context) : scheme.error,
             text: '授权结果 · $label');
       // ---- 子agent ----
       case 'subagent/descriptor':
         final mode = '${r.data['mode'] ?? ''}';
         return _chipTile(
             icon: Icons.account_tree_outlined,
-            color: Colors.tealAccent,
+            color: Acc.teal(context),
             text:
                 '子agent · ${mode == 'one-shot' ? '一次性' : '可续聊'}',
             sub: '${r.data['provider'] ?? ''}');
@@ -1713,31 +1713,31 @@ class _SessionPageState extends State<SessionPage> {
       case 'tool-workflow/run-start':
         return _chipTile(
             icon: Icons.run_circle_outlined,
-            color: Colors.cyanAccent,
+            color: Acc.cyan(context),
             text: '后台任务 · ${r.data['name'] ?? ''}',
             sub: '${r.data['runId'] ?? ''}');
       case 'tool-workflow/agent-start':
         return _chipTile(
             icon: Icons.person_add_alt_outlined,
-            color: Colors.cyanAccent,
+            color: Acc.cyan(context),
             text: '后台成员 #${r.data['seq'] ?? '?'} · ${r.data['label'] ?? ''}',
             sub: '${r.data['phase'] ?? ''}');
       case 'tool-workflow/agent-end':
         return _chipTile(
             icon: Icons.done_all,
-            color: Colors.cyanAccent,
+            color: Acc.cyan(context),
             text: '后台成员完成 #${r.data['seq'] ?? '?'} · ${r.data['outcome'] ?? ''}');
       case 'tool-workflow/run-end':
         return _chipTile(
             icon: Icons.stop_circle_outlined,
-            color: Colors.cyanAccent,
+            color: Acc.cyan(context),
             text: '后台任务结束 · ${r.data['stopReason'] ?? ''}');
       // ---- 命令 ----
       case 'command/run':
         final args = '${r.data['args'] ?? ''}';
         return _chipTile(
             icon: Icons.terminal,
-            color: Colors.amberAccent,
+            color: Acc.amber(context),
             text: '命令 · /${r.data['name'] ?? ''}${args.isEmpty ? '' : ' $args'}');
       case 'command/done':
         if (r.data['kind'] != 'error') return const SizedBox.shrink();
@@ -1749,13 +1749,13 @@ class _SessionPageState extends State<SessionPage> {
       case 'compaction/start':
         return _chipTile(
             icon: Icons.compress,
-            color: Colors.purpleAccent,
+            color: Acc.purple(context),
             text: '上下文压缩 · 开始');
       case 'compaction/summary':
         final n = (r.data['shadowedTokenCount'] as num? ?? 0).toInt();
         return _chipTile(
             icon: Icons.compress,
-            color: Colors.purpleAccent,
+            color: Acc.purple(context),
             text: '上下文压缩 · 完成',
             sub: n > 0 ? '压缩 ${_fmtTokens(n)} tokens' : null);
       case 'compaction/end':
@@ -1772,7 +1772,7 @@ class _SessionPageState extends State<SessionPage> {
         final op = '${r.data['operation'] ?? ''}';
         return _chipTile(
             icon: Icons.flag_outlined,
-            color: Colors.pinkAccent,
+            color: Acc.pink(context),
             text: '目标 · ${op == 'clear' ? '已清除' : objective.isEmpty ? op : objective}');
       // ---- 交付物 ----
       case 'deliverables/presented':
@@ -1783,7 +1783,7 @@ class _SessionPageState extends State<SessionPage> {
             .join('、');
         return _chipTile(
             icon: Icons.inventory_2_outlined,
-            color: Colors.greenAccent,
+            color: Acc.green(context),
             text: '交付物 · ${files.length} 个文件',
             sub: paths);
       // ---- 状态小事件 ----
@@ -1825,14 +1825,14 @@ class _SessionPageState extends State<SessionPage> {
             : '$failure';
         return _chipTile(
             icon: Icons.replay_outlined,
-            color: Colors.amberAccent,
+            color: Acc.amber(context),
             text:
                 '模型重试 · 第 $retryNo${maxNo.isEmpty ? '' : '/$maxNo'} 次（${delayMs}ms 后）',
             sub: failText.isEmpty || failText == 'null' ? null : failText);
       case 'llm/retry-started':
         return _chipTile(
             icon: Icons.replay_outlined,
-            color: Colors.amberAccent,
+            color: Acc.amber(context),
             text: '模型重试开始 · 第 ${r.data['retry'] ?? '?'} 次');
       // ---- 消息反馈（👍/👎 + 备注） ----
       case 'feedback/message-put':
@@ -1841,7 +1841,7 @@ class _SessionPageState extends State<SessionPage> {
             icon: '${r.data['rating']}' == 'negative'
                 ? Icons.thumb_down_alt_outlined
                 : Icons.thumb_up_alt_outlined,
-            color: Colors.tealAccent,
+            color: Acc.teal(context),
             text: '消息反馈 · ${'${r.data['rating']}' == 'negative' ? '差评' : '好评'}',
             sub: note.isEmpty ? null : note);
       case 'feedback/message-delete':
@@ -1852,7 +1852,7 @@ class _SessionPageState extends State<SessionPage> {
       case 'feedback/record':
         return _chipTile(
             icon: Icons.rate_review_outlined,
-            color: Colors.tealAccent,
+            color: Acc.teal(context),
             text: '反馈记录 · ${r.data['kind'] ?? r.data['rating'] ?? ''}',
             sub: '${r.data['note'] ?? ''}'.trim().isEmpty
                 ? null
@@ -1874,7 +1874,7 @@ class _SessionPageState extends State<SessionPage> {
             .join('\n');
         return _chipTile(
             icon: Icons.edit_note_outlined,
-            color: Colors.pinkAccent,
+            color: Acc.pink(context),
             text: canceled
                 ? '消息撤回'
                 : '消息改写 · 撤下 $removed 条 / 补入 ${inserted.length} 条',
@@ -1890,7 +1890,7 @@ class _SessionPageState extends State<SessionPage> {
         };
         return _chipTile(
             icon: Icons.schedule_outlined,
-            color: Colors.lightBlueAccent,
+            color: Acc.lightBlue(context),
             text: '定时任务 · $opLabel',
             sub: '${r.data['id'] ?? ''}');
       // ---- B 档：低频事件折叠成一行小 tile，不刷屏也不失可见性 ----
@@ -1926,12 +1926,12 @@ class _SessionPageState extends State<SessionPage> {
       case 'team/member':
         return _chipTile(
             icon: Icons.groups_outlined,
-            color: Colors.cyanAccent,
+            color: Acc.cyan(context),
             text: '团队成员 · ${r.data['member'] is Map ? '${(r.data['member'] as Map)['name'] ?? (r.data['member'] as Map)['role'] ?? ''}' : ''}');
       case 'team/task':
         return _chipTile(
             icon: Icons.groups_outlined,
-            color: Colors.cyanAccent,
+            color: Acc.cyan(context),
             text: '团队任务 · ${r.data['task'] is Map ? '${(r.data['task'] as Map)['title'] ?? (r.data['task'] as Map)['summary'] ?? (r.data['task'] as Map)['status'] ?? ''}' : ''}');
       case 'team/message/queued':
         return _chipTile(
@@ -1948,7 +1948,7 @@ class _SessionPageState extends State<SessionPage> {
         final tok = (r.data['shadowedTokenCount'] as num? ?? 0).toInt();
         return _chipTile(
             icon: Icons.compress,
-            color: Colors.purpleAccent,
+            color: Acc.purple(context),
             text: '上下文压缩 · 裁剪 #${range['start'] ?? '?'}–#${range['end'] ?? '?'}',
             sub: tok > 0 ? '${_fmtTokens(tok)} tokens' : null);
       default:
@@ -1994,7 +1994,7 @@ class _SessionPageState extends State<SessionPage> {
             tooltip: _planActive ? '计划模式 · 开（点按退出）' : '计划模式 · 关（点按开启）',
             icon: Icon(
               Icons.map_outlined,
-              color: _planActive ? Colors.lightBlueAccent : null,
+              color: _planActive ? Acc.lightBlue(context) : null,
             ),
           ),
           if (isSubagent && canPop)
@@ -2555,7 +2555,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
             if (e.isError)
               Icon(Icons.close, size: 14, color: scheme.error)
             else if (done)
-              const Icon(Icons.check, size: 14, color: Colors.greenAccent)
+              Icon(Icons.check, size: 14, color: Acc.green(context))
             else
               SizedBox(
                   width: 12,
@@ -2668,13 +2668,13 @@ class _ToolCallCardState extends State<_ToolCallCard> {
               color: (e.isError
                       ? scheme.error
                       : done
-                          ? Colors.greenAccent
-                          : Colors.lightBlueAccent)
+                          ? Acc.green(context)
+                          : Acc.lightBlue(context))
                   .withValues(alpha: 0.45)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Icon(Icons.map_outlined, size: 14, color: Colors.lightBlueAccent),
+            Icon(Icons.map_outlined, size: 14, color: Acc.lightBlue(context)),
             const SizedBox(width: 6),
             Expanded(
               child: Text(title,
@@ -2690,7 +2690,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
             else
               Icon(e.isError ? Icons.close : Icons.check,
                   size: 14,
-                  color: e.isError ? scheme.error : Colors.greenAccent),
+                  color: e.isError ? scheme.error : Acc.green(context)),
             if (e.durationMs != null) ...[
               const SizedBox(width: 6),
               Text(_fmtDuration(e.durationMs!),
@@ -2706,7 +2706,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
               Padding(
                 padding: const EdgeInsets.only(top: 1),
                 child: Icon(e.isError ? Icons.close : Icons.check_circle,
-                    size: 12, color: e.isError ? scheme.error : Colors.greenAccent),
+                    size: 12, color: e.isError ? scheme.error : Acc.green(context)),
               ),
               const SizedBox(width: 5),
               Expanded(
@@ -2717,7 +2717,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                           ? '计划已批准 · 退出计划模式，开始执行'
                           : e.resultText),
                   style: theme.textTheme.labelSmall?.copyWith(
-                      color: e.isError ? scheme.error : Colors.greenAccent),
+                      color: e.isError ? scheme.error : Acc.green(context)),
                 ),
               ),
             ]),
@@ -2763,14 +2763,14 @@ class _ToolCallCardState extends State<_ToolCallCard> {
           color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-              color: (e.hasResult ? Colors.greenAccent : Colors.orangeAccent)
+              color: (e.hasResult ? Acc.green(context) : Acc.orange(context))
                   .withValues(alpha: 0.45)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Icon(Icons.question_answer_outlined,
                 size: 14,
-                color: e.hasResult ? Colors.greenAccent : Colors.orangeAccent),
+                color: e.hasResult ? Acc.green(context) : Acc.orange(context)),
             const SizedBox(width: 6),
             Text('询问 · ${questions.length} 个问题',
                 style: theme.textTheme.labelMedium
@@ -2783,7 +2783,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                   child: CircularProgressIndicator(
                       strokeWidth: 1.8, color: scheme.primary))
             else
-              const Icon(Icons.check, size: 14, color: Colors.greenAccent),
+              Icon(Icons.check, size: 14, color: Acc.green(context)),
             if (e.durationMs != null) ...[
               const SizedBox(width: 6),
               Text(_fmtDuration(e.durationMs!),
@@ -2853,12 +2853,12 @@ class _ToolCallCardState extends State<_ToolCallCard> {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
                 color: isSel
-                    ? Colors.greenAccent.withValues(alpha: 0.13)
+                    ? Acc.green(context).withValues(alpha: 0.13)
                     : scheme.surfaceContainerHighest.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                     color: isSel
-                        ? Colors.greenAccent.withValues(alpha: 0.5)
+                        ? Acc.green(context).withValues(alpha: 0.5)
                         : scheme.outlineVariant.withValues(alpha: 0.4)),
               ),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2874,7 +2874,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                               : Icons.radio_button_unchecked),
                       size: 13,
                       color:
-                          isSel ? Colors.greenAccent : scheme.onSurfaceVariant),
+                          isSel ? Acc.green(context) : scheme.onSurfaceVariant),
                 ),
                 const SizedBox(width: 7),
                 Expanded(
@@ -2926,16 +2926,16 @@ class _ToolCallCardState extends State<_ToolCallCard> {
         for (final o in options)
           if (selected.contains('${o['label']}')) ...[
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(top: 1),
                 child:
-                    Icon(Icons.check_circle, size: 13, color: Colors.greenAccent),
+                    Icon(Icons.check_circle, size: 13, color: Acc.green(context)),
               ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(questionLabel(q, '${o['label']}'),
                     style: theme.textTheme.bodySmall
-                        ?.copyWith(color: Colors.greenAccent)),
+                        ?.copyWith(color: Acc.green(context))),
               ),
             ]),
             if ('${o['description'] ?? ''}'.trim().isNotEmpty)
@@ -2951,13 +2951,13 @@ class _ToolCallCardState extends State<_ToolCallCard> {
             Padding(
               padding: const EdgeInsets.only(top: 1),
               child: Icon(Icons.short_text,
-                  size: 13, color: Colors.greenAccent.shade200),
+                  size: 13, color: Acc.green(context)),
             ),
             const SizedBox(width: 6),
             Expanded(
               child: Text(custom,
                   style: theme.textTheme.bodySmall
-                      ?.copyWith(color: Colors.greenAccent)),
+                      ?.copyWith(color: Acc.green(context))),
             ),
           ]),
       ],

@@ -149,7 +149,7 @@ ThemeData _darkGlass() {
     tokens: tokens,
     scaffoldBg: c.surface,
     appBar: AppBarTheme(
-      backgroundColor: Colors.transparent,
+      backgroundColor: const Color(0xFF0C1526),
       foregroundColor: c.onSurface,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -259,7 +259,7 @@ ThemeData _brandSplash() {
     tokens: tokens,
     scaffoldBg: c.surface,
     appBar: AppBarTheme(
-      backgroundColor: Colors.transparent,
+      backgroundColor: c.primary,
       foregroundColor: Colors.white,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -420,10 +420,54 @@ class SkinStore {
 /// 皮肤状态（全局单例）：抽屉切换器写这里，MaterialApp 监听重建。
 final ValueNotifier<DshSkin> skinNotifier = ValueNotifier<DshSkin>(DshSkin.darkGlass);
 
+/// 语义强调色：深底=霓虹 *Accent（原风格），浅底=同色相饱和实色（霓虹在白底上隐形）。
+/// 用法：`Acc.green(context)`；已知 Brightness 的工具函数内用 `Acc.greenOf(b)`。
+class Acc {
+  static Color green(BuildContext c) =>
+      _v(Theme.of(c).brightness, Colors.greenAccent, const Color(0xFF2E7D32));
+  static Color teal(BuildContext c) =>
+      _v(Theme.of(c).brightness, Colors.tealAccent, const Color(0xFF00897B));
+  static Color pink(BuildContext c) =>
+      _v(Theme.of(c).brightness, Colors.pinkAccent, const Color(0xFFC2185B));
+  static Color purple(BuildContext c) =>
+      _v(Theme.of(c).brightness, Colors.purpleAccent, const Color(0xFF6A1B9A));
+  static Color orange(BuildContext c) =>
+      _v(Theme.of(c).brightness, Colors.orangeAccent, const Color(0xFFE64A19));
+  static Color amber(BuildContext c) =>
+      _v(Theme.of(c).brightness, Colors.amberAccent, const Color(0xFFB26A00));
+  static Color cyan(BuildContext c) =>
+      _v(Theme.of(c).brightness, Colors.cyanAccent, const Color(0xFF00838F));
+  static Color lightBlue(BuildContext c) =>
+      _v(Theme.of(c).brightness, Colors.lightBlueAccent, const Color(0xFF0277BD));
+  static Color red(BuildContext c) =>
+      _v(Theme.of(c).brightness, Colors.redAccent, const Color(0xFFC62828));
+
+  static Color greenOf(Brightness b) =>
+      _v(b, Colors.greenAccent, const Color(0xFF2E7D32));
+  static Color tealOf(Brightness b) =>
+      _v(b, Colors.tealAccent, const Color(0xFF00897B));
+  static Color pinkOf(Brightness b) =>
+      _v(b, Colors.pinkAccent, const Color(0xFFC2185B));
+  static Color purpleOf(Brightness b) =>
+      _v(b, Colors.purpleAccent, const Color(0xFF6A1B9A));
+  static Color orangeOf(Brightness b) =>
+      _v(b, Colors.orangeAccent, const Color(0xFFE64A19));
+  static Color amberOf(Brightness b) =>
+      _v(b, Colors.amberAccent, const Color(0xFFB26A00));
+  static Color cyanOf(Brightness b) =>
+      _v(b, Colors.cyanAccent, const Color(0xFF00838F));
+  static Color lightBlueOf(Brightness b) =>
+      _v(b, Colors.lightBlueAccent, const Color(0xFF0277BD));
+
+  static Color _v(Brightness brightness, Color neon, Color deep) =>
+      brightness == Brightness.dark ? neon : deep;
+}
+
 /// 顶栏渐变挂载点（各页 AppBar 的 flexibleSpace 统一引用；渐变为 null 时留空吃主题底色）。
+/// 注意：必须 SizedBox.expand 撑满——无子 DecoratedBox 在 loose 约束下是 0×0，渐变会整块不画。
 Widget skinFlexibleSpace(BuildContext context) {
   final tk = Theme.of(context).extension<SkinTokens>();
   final g = tk?.appbarGradient;
   if (g == null) return const SizedBox.shrink();
-  return DecoratedBox(decoration: BoxDecoration(gradient: g));
+  return SizedBox.expand(child: DecoratedBox(decoration: BoxDecoration(gradient: g)));
 }

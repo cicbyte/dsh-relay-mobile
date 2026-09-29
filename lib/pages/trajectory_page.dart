@@ -224,18 +224,18 @@ class _TrajectoryPageState extends State<TrajectoryPage> {
 
   Color _typeColor(String type, ColorScheme scheme) {
     if (type.startsWith('user/')) return scheme.primary;
-    if (type.startsWith('assistant/')) return Colors.tealAccent;
-    if (type.startsWith('tool/')) return Colors.orangeAccent;
-    if (type.startsWith('compaction/')) return Colors.purpleAccent;
+    if (type.startsWith('assistant/')) return Acc.tealOf(scheme.brightness);
+    if (type.startsWith('tool/')) return Acc.orangeOf(scheme.brightness);
+    if (type.startsWith('compaction/')) return Acc.purpleOf(scheme.brightness);
     if (type.startsWith('step/')) return scheme.onSurfaceVariant.withValues(alpha: 0.6);
-    if (type.startsWith('todo/')) return Colors.greenAccent;
-    if (type.startsWith('approval/')) return Colors.orangeAccent;
-    if (type.startsWith('plan/')) return Colors.lightBlueAccent;
+    if (type.startsWith('todo/')) return Acc.greenOf(scheme.brightness);
+    if (type.startsWith('approval/')) return Acc.orangeOf(scheme.brightness);
+    if (type.startsWith('plan/')) return Acc.lightBlueOf(scheme.brightness);
     if (type.startsWith('subagent/') || type.startsWith('tool-workflow/')) {
-      return Colors.cyanAccent;
+      return Acc.cyanOf(scheme.brightness);
     }
-    if (type.startsWith('goal/')) return Colors.pinkAccent;
-    if (type.startsWith('command/')) return Colors.amberAccent;
+    if (type.startsWith('goal/')) return Acc.pinkOf(scheme.brightness);
+    if (type.startsWith('command/')) return Acc.amberOf(scheme.brightness);
     return scheme.onSurfaceVariant;
   }
 

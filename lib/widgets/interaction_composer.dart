@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+
 import '../dsh/interactions.dart';
 import 'markdown_text.dart';
 
@@ -212,7 +214,7 @@ class _InteractionComposerState extends State<InteractionComposer> {
     // 计划评审走决策卡（对齐 web PlanReviewPanel），不复用问答流。
     final review = approval ? null : planReviewOf(_questions);
     if (review != null) return _planReviewCard(context, review, p.eventId);
-    final accent = approval ? Colors.orangeAccent : scheme.primary;
+    final accent = approval ? Acc.orange(context) : scheme.primary;
     return Container(
       margin: const EdgeInsets.fromLTRB(10, 4, 10, 8),
       padding: const EdgeInsets.all(12),
@@ -345,7 +347,7 @@ class _InteractionComposerState extends State<InteractionComposer> {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.5)),
+        border: Border.all(color: Acc.lightBlue(context).withValues(alpha: 0.5)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -356,8 +358,8 @@ class _InteractionComposerState extends State<InteractionComposer> {
             Container(
               width: 7,
               height: 7,
-              decoration: const BoxDecoration(
-                  color: Colors.lightBlueAccent, shape: BoxShape.circle),
+              decoration: BoxDecoration(
+                  color: Acc.lightBlue(context), shape: BoxShape.circle),
             ),
             const SizedBox(width: 6),
             Text('计划待审',

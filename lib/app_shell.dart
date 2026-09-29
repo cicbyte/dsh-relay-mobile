@@ -314,7 +314,7 @@ class DshDrawer extends StatelessWidget {
                   width: 9,
                   height: 9,
                   decoration: BoxDecoration(
-                    color: connected ? Colors.greenAccent : theme.colorScheme.error,
+                    color: connected ? Acc.green(context) : theme.colorScheme.error,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -360,12 +360,12 @@ class DshDrawer extends StatelessWidget {
                         selected: skin == s,
                         showCheckmark: false,
                         labelPadding: const EdgeInsets.symmetric(horizontal: 12),
-                        // 高对比胶囊：选中=实底反色，未选=半实底+描边（渐变/暗面板各配）
+                        // 高对比胶囊：选中=实底反色；渐变面板未选=深navy实底（白字），暗面板未选=半实底
                         selectedColor: gradientPanel
                             ? Colors.white
                             : theme.colorScheme.primary,
                         backgroundColor: gradientPanel
-                            ? Colors.white.withValues(alpha: 0.22)
+                            ? const Color(0xE6152347)
                             : onPanel.withValues(alpha: 0.12),
                         side: BorderSide(
                             color: onPanelDim.withValues(alpha: 0.55)),
@@ -427,7 +427,7 @@ class DshDrawer extends StatelessWidget {
                                     Icon(
                                       s.running ? Icons.play_circle : Icons.chat_bubble_outline,
                                       size: 18,
-                                      color: s.running ? Colors.greenAccent : theme.colorScheme.onSurfaceVariant,
+                                      color: s.running ? Acc.green(context) : theme.colorScheme.onSurfaceVariant,
                                     ),
                                     const SizedBox(width: 10),
                                     Expanded(
