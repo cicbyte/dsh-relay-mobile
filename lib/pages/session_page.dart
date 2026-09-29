@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../device_info.dart';
 import '../dsh/dsh_client.dart';
 import '../dsh/interactions.dart';
+import '../theme.dart';
 import '../widgets/interaction_composer.dart';
 import '../widgets/markdown_text.dart';
 import 'trajectory_page.dart';
@@ -1968,6 +1969,7 @@ class _SessionPageState extends State<SessionPage> {
     final isSubagent = widget.summary.parentSessionId != null;
     return Scaffold(
       appBar: AppBar(
+        flexibleSpace: Builder(builder: skinFlexibleSpace),
         leading: IconButton(
           icon: Icon(canPop ? Icons.arrow_back : Icons.menu),
           tooltip: canPop ? '返回上级' : '菜单',
@@ -2082,6 +2084,7 @@ class _SessionPageState extends State<SessionPage> {
                 );
               }
               final scheme = Theme.of(context).colorScheme;
+              final tk = Theme.of(context).extension<SkinTokens>()!;
               return SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
@@ -2099,11 +2102,21 @@ class _SessionPageState extends State<SessionPage> {
                       if (_paletteQuery != null) _commandPalette(),
                       // 输入卡（参考 DeepSeek 输入卡：大圆角卡、上文本区，
                       // 下控制排——左图标+文字药丸，右圆钮[附件][提及][发送]）。
+                      // 装饰走皮肤令牌（换皮不换布局）
                       Container(
                         decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(26),
-                          border: Border.all(color: scheme.outlineVariant),
+                          color: tk.composerFill,
+                          borderRadius: BorderRadius.circular(tk.composerRadius),
+                          border: tk.composerBorder == null
+                              ? null
+                              : Border.all(color: tk.composerBorder!),
+                          boxShadow: [
+                            if (tk.glowColor != null)
+                              BoxShadow(
+                                  color: tk.glowColor!,
+                                  blurRadius: 22,
+                                  offset: const Offset(0, 6)),
+                          ],
                         ),
                         padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
                         child: Column(

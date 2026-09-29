@@ -1,27 +1,34 @@
 import 'package:flutter/material.dart';
 
 import 'app_shell.dart';
+import 'theme.dart';
 
-void main() {
-  runApp(const DshMobileApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final skin = await SkinStore.load();
+  runApp(DshMobileApp(initialSkin: skin));
 }
 
+/// 皮肤状态（全局单例，声明在 theme.dart）：抽屉切换器写这里，MaterialApp 监听重建。
+
 class DshMobileApp extends StatelessWidget {
-  const DshMobileApp({super.key});
+  const DshMobileApp({super.key, this.initialSkin = DshSkin.darkGlass});
+
+  final DshSkin initialSkin;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'DSH Mobile',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4F6BED),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
-      home: const AppRoot(),
+    skinNotifier.value = initialSkin;
+    return ValueListenableBuilder<DshSkin>(
+      valueListenable: skinNotifier,
+      builder: (context, skin, _) {
+        return MaterialApp(
+          title: 'DSH Mobile',
+          debugShowCheckedModeBanner: false,
+          theme: DshTheme.of(skin),
+          home: const AppRoot(),
+        );
+      },
     );
   }
 }

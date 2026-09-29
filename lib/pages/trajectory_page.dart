@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../dsh/dsh_client.dart';
+import '../theme.dart';
 
 /// 轨迹视图（对齐 web 版 TrajectoryView）：全部事件（含 step/ 等协议事件）
 /// 按轮次分组的时间线，支持类型/内容搜索，点行展开原始 JSON。
@@ -48,7 +49,7 @@ class _TrajectoryPageState extends State<TrajectoryPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: AppBar(flexibleSpace: Builder(builder: skinFlexibleSpace), title: Text(widget.title)),
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),

@@ -7,6 +7,7 @@ import '../dsh/discovery.dart';
 import '../dsh/profiles.dart';
 import '../dsh/qr_payload.dart';
 import '../dsh/transport.dart';
+import '../theme.dart';
 import 'scan_page.dart';
 
 /// 连接设置页：环境（Profile）卡片流 + 双模式四入网方式。
@@ -223,6 +224,7 @@ class _ConnectPageState extends State<ConnectPage> {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
+        flexibleSpace: Builder(builder: skinFlexibleSpace),
         leading: IconButton(icon: const Icon(Icons.menu), onPressed: widget.onOpenDrawer),
         title: const Text('连接设置'),
         actions: [

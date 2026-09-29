@@ -2,6 +2,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../theme.dart';
+
 /// 扫码页：相机识别 + 相册识别（模拟器无相机时用相册），返回原始 payload。
 class ScanPage extends StatefulWidget {
   const ScanPage({super.key});
@@ -51,6 +53,7 @@ class _ScanPageState extends State<ScanPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        flexibleSpace: Builder(builder: skinFlexibleSpace),
         title: const Text('扫码入网'),
         actions: [
           IconButton(

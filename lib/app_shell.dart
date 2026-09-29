@@ -6,6 +6,7 @@ import 'dsh/profiles.dart';
 import 'dsh/transport.dart';
 import 'pages/connect_page.dart';
 import 'pages/session_page.dart';
+import 'theme.dart';
 
 /// 应用根：持有连接状态（transport/client）与会话列表，供抽屉与主内容共享。
 class AppRoot extends StatefulWidget {
@@ -260,10 +261,15 @@ class DshDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tk = theme.extension<SkinTokens>()!;
     final width = MediaQuery.of(context).size.width * 0.8;
-    final background = theme.brightness == Brightness.dark
-        ? const Color(0xFF121213)
-        : const Color(0xFFF7F7F7);
+    // 面板底色/渐变走皮肤令牌；渐变面板上的前景统一转白（布局不动，纯换皮）
+    final background = theme.colorScheme.surface;
+    final gradientPanel = tk.drawerGradient != null;
+    final onPanel = gradientPanel ? Colors.white : theme.colorScheme.onSurface;
+    final onPanelDim = gradientPanel
+        ? Colors.white.withValues(alpha: 0.78)
+        : theme.colorScheme.onSurfaceVariant;
 
     Widget entryRow(IconData icon, String label, VoidCallback onTap) {
       return Padding(
@@ -277,10 +283,10 @@ class DshDrawer extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
               child: Row(children: [
-                Icon(icon, size: 22, color: theme.colorScheme.onSurface),
+                Icon(icon, size: 22, color: onPanel),
                 const SizedBox(width: 12),
-                Expanded(child: Text(label, style: theme.textTheme.bodyLarge)),
-                Icon(Icons.chevron_right, size: 20, color: theme.colorScheme.onSurfaceVariant),
+                Expanded(child: Text(label, style: theme.textTheme.bodyLarge?.copyWith(color: onPanel))),
+                Icon(Icons.chevron_right, size: 20, color: onPanelDim),
               ]),
             ),
           ),
@@ -289,9 +295,14 @@ class DshDrawer extends StatelessWidget {
     }
 
     return Drawer(
-      backgroundColor: background,
+      backgroundColor: gradientPanel ? Colors.transparent : background,
       width: width,
-      child: SafeArea(
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: tk.drawerGradient,
+          color: gradientPanel ? null : background,
+        ),
+        child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -311,17 +322,60 @@ class DshDrawer extends StatelessWidget {
                 Expanded(
                   child: Text(
                     connected ? 'DSH · 已连接' : '未连接',
-                    style: theme.textTheme.titleSmall,
+                    style: theme.textTheme.titleSmall?.copyWith(color: onPanel),
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Icons.refresh, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                  icon: Icon(Icons.refresh, size: 18, color: onPanelDim),
                   onPressed: connected ? onRefresh : null,
                 ),
               ]),
             ),
             entryRow(Icons.settings_outlined, '连接设置', onOpenSettings),
             entryRow(Icons.add_comment_outlined, '新建会话', onNewSession),
+            // 皮肤切换（A 深空玻璃 / C 鲸蓝，换皮不换布局）
+            ValueListenableBuilder<DshSkin>(
+              valueListenable: skinNotifier,
+              builder: (context, skin, _) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                child: Row(children: [
+                  const SizedBox(width: 10),
+                  Icon(Icons.palette_outlined, size: 22, color: onPanel),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text('皮肤', style: theme.textTheme.bodyLarge?.copyWith(color: onPanel))),
+                  for (final s in DshSkin.values)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: ChoiceChip(
+                        label: Text('${s.short} ${s.label.split('·').last.trim()}',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight:
+                                    skin == s ? FontWeight.w600 : FontWeight.w400,
+                                color: skin == s
+                                    ? (gradientPanel
+                                        ? theme.colorScheme.primary
+                                        : Colors.white)
+                                    : onPanel)),
+                        selected: skin == s,
+                        showCheckmark: false,
+                        // 渐变面板上白底蓝字、暗/浅面板上蓝底白字；未选=描边透明底
+                        selectedColor: gradientPanel
+                            ? Colors.white
+                            : theme.colorScheme.primary,
+                        backgroundColor: Colors.transparent,
+                        side: BorderSide(
+                            color: onPanelDim.withValues(alpha: 0.45)),
+                        visualDensity: VisualDensity.compact,
+                        onSelected: (_) {
+                          skinNotifier.value = s;
+                          SkinStore.save(s);
+                        },
+                      ),
+                    ),
+                ]),
+              ),
+            ),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: Divider(height: 1),
@@ -330,7 +384,7 @@ class DshDrawer extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
               child: Text('会话',
                   style: theme.textTheme.titleSmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                      ?.copyWith(color: onPanelDim)),
             ),
             Expanded(
               child: sessionsLoading && sessions.isEmpty
@@ -356,7 +410,9 @@ class DshDrawer extends StatelessWidget {
                             final isSelected = selected?.sessionId == s.sessionId;
                             return Material(
                               color: isSelected
-                                  ? theme.colorScheme.primary.withValues(alpha: 0.15)
+                                  ? (gradientPanel
+                                      ? Colors.white.withValues(alpha: 0.18)
+                                      : theme.colorScheme.primary.withValues(alpha: 0.15))
                                   : Colors.transparent,
                               borderRadius: BorderRadius.circular(10),
                               child: InkWell(
@@ -376,7 +432,7 @@ class DshDrawer extends StatelessWidget {
                                         s.title.isEmpty ? '(未命名会话)' : s.title,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: theme.textTheme.bodyMedium,
+                                        style: theme.textTheme.bodyMedium?.copyWith(color: onPanel),
                                       ),
                                     ),
                                   ]),
@@ -391,19 +447,20 @@ class DshDrawer extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
               child: Row(children: [
-                Icon(Icons.cloud_outlined, size: 16, color: theme.colorScheme.onSurfaceVariant),
+                Icon(Icons.cloud_outlined, size: 16, color: onPanelDim),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(modeLabel,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                          ?.copyWith(color: onPanelDim)),
                 ),
               ]),
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -425,6 +482,7 @@ class _EmptySessionView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        flexibleSpace: Builder(builder: skinFlexibleSpace),
         leading: IconButton(icon: const Icon(Icons.menu), onPressed: onOpenDrawer),
         title: const Text('DSH Mobile'),
       ),
