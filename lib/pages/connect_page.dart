@@ -225,7 +225,22 @@ class _ConnectPageState extends State<ConnectPage> {
     return Scaffold(
       appBar: AppBar(
         flexibleSpace: Builder(builder: skinFlexibleSpace),
-        leading: IconButton(icon: const Icon(Icons.menu), onPressed: widget.onOpenDrawer),
+        leading: Builder(builder: (context) {
+          // 作为设置页子路由 push 时显示返回，直接上屏时显示菜单
+          final canPop = Navigator.of(context).canPop();
+          return IconButton(
+            icon: Icon(canPop ? Icons.arrow_back : Icons.menu),
+            tooltip: canPop ? '返回' : '菜单',
+            onPressed: () {
+              final nav = Navigator.of(context);
+              if (nav.canPop()) {
+                nav.pop();
+              } else {
+                widget.onOpenDrawer();
+              }
+            },
+          );
+        }),
         title: const Text('连接设置'),
         actions: [
           IconButton(

@@ -4,8 +4,8 @@ import 'dsh/conn_store.dart';
 import 'dsh/dsh_client.dart';
 import 'dsh/profiles.dart';
 import 'dsh/transport.dart';
-import 'pages/connect_page.dart';
 import 'pages/session_page.dart';
+import 'pages/settings_page.dart';
 import 'theme.dart';
 
 /// 应用根：持有连接状态（transport/client）与会话列表，供抽屉与主内容共享。
@@ -220,9 +220,11 @@ class _AppRootState extends State<AppRoot> {
                       onOpenDrawer: () => rootScaffoldKey.currentState?.openDrawer(),
                       onSessionEnded: refreshSessions,
                     ),
-              ConnectPage(
+              SettingsPage(
                 onConnected: _onConnected,
                 onOpenDrawer: () => rootScaffoldKey.currentState?.openDrawer(),
+                modeLabel: _modeLabel,
+                connected: client != null,
               ),
             ],
           );
@@ -331,54 +333,8 @@ class DshDrawer extends StatelessWidget {
                 ),
               ]),
             ),
-            entryRow(Icons.settings_outlined, '连接设置', onOpenSettings),
+            entryRow(Icons.settings_outlined, '设置', onOpenSettings),
             entryRow(Icons.add_comment_outlined, '新建会话', onNewSession),
-            // 皮肤切换（A 深空玻璃 / C 鲸蓝，换皮不换布局）
-            ValueListenableBuilder<DshSkin>(
-              valueListenable: skinNotifier,
-              builder: (context, skin, _) => Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                child: Row(children: [
-                  const SizedBox(width: 10),
-                  Icon(Icons.palette_outlined, size: 22, color: onPanel),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text('皮肤', style: theme.textTheme.bodyLarge?.copyWith(color: onPanel))),
-                  for (final s in DshSkin.values)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 6),
-                      child: ChoiceChip(
-                        label: Text('${s.short} ${s.label.split('·').last.trim()}',
-                            style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight:
-                                    skin == s ? FontWeight.w700 : FontWeight.w500,
-                                color: skin == s
-                                    ? (gradientPanel
-                                        ? theme.colorScheme.primary
-                                        : Colors.white)
-                                    : onPanel)),
-                        selected: skin == s,
-                        showCheckmark: false,
-                        labelPadding: const EdgeInsets.symmetric(horizontal: 12),
-                        // 高对比胶囊：选中=实底反色；渐变面板未选=深navy实底（白字），暗面板未选=半实底
-                        selectedColor: gradientPanel
-                            ? Colors.white
-                            : theme.colorScheme.primary,
-                        backgroundColor: gradientPanel
-                            ? const Color(0xE6152347)
-                            : onPanel.withValues(alpha: 0.12),
-                        side: BorderSide(
-                            color: onPanelDim.withValues(alpha: 0.55)),
-                        visualDensity: VisualDensity.standard,
-                        onSelected: (_) {
-                          skinNotifier.value = s;
-                          SkinStore.save(s);
-                        },
-                      ),
-                    ),
-                ]),
-              ),
-            ),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: Divider(height: 1),
@@ -497,14 +453,14 @@ class _EmptySessionView extends StatelessWidget {
             children: [
               Icon(Icons.forum_outlined, size: 56, color: Theme.of(context).colorScheme.onSurfaceVariant),
               const SizedBox(height: 16),
-              Text(connected ? '从侧边栏选择一个会话' : '先在「连接设置」中连接 DSH',
+              Text(connected ? '从侧边栏选择一个会话' : '先在「设置 → 连接」中连接 DSH',
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               Text('点左上角菜单打开侧边栏',
                   style: Theme.of(context).textTheme.bodySmall),
               if (!connected) ...[
                 const SizedBox(height: 16),
-                FilledButton(onPressed: onOpenSettings, child: const Text('去连接')),
+                FilledButton(onPressed: onOpenSettings, child: const Text('去设置')),
               ],
             ],
           ),
