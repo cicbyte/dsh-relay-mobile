@@ -198,6 +198,10 @@ class RelayTransport extends DshTransport {
   bool _authFailed = false;
   String? lastAuthError;
 
+  /// 限流冷却：rate-limited 后在到期前 connect() 本地快速失败——
+  /// 严禁把重连风暴喂进服务端限流窗口（活锁：越喂越限、越限越喂）
+  DateTime? _retryNotBefore;
+
   /// 配对成功后本实例持有的设备身份（供上层落盘后下次重连复用）
   String? pairedDeviceId;
   String? pairedToken;
@@ -222,6 +226,11 @@ class RelayTransport extends DshTransport {
     if (_ws != null) return;
     if (_authFailed) {
       throw TransportException('relay/${lastAuthError ?? 'auth'}', relayRejectMessage(lastAuthError ?? 'auth'));
+    }
+    final notBefore = _retryNotBefore;
+    if (notBefore != null && DateTime.now().isBefore(notBefore)) {
+      final secs = notBefore.difference(DateTime.now()).inSeconds.clamp(1, 3600);
+      throw TransportException('relay/rate-limited', '尝试过于频繁：请 $secs 秒后重试');
     }
     final ws = await WebSocket.connect(
       relay.replace(scheme: relay.scheme == 'https' ? 'wss' : 'ws').toString(),
@@ -268,7 +277,11 @@ class RelayTransport extends DshTransport {
     if (verdict['type'] != 'welcome') {
       final c = '${verdict['code'] ?? 'rejected'}';
       final msg = relayRejectMessage(c);
-      if (isAuthReject(c)) {
+      if (c == 'rate-limited') {
+        // 尊重服务端 retryAfterSecs（缺省 30s）：冷却期内本地快速失败，不喂限流窗口
+        final hint = (verdict['retryAfterSecs'] as num?)?.toInt() ?? 0;
+        _retryNotBefore = DateTime.now().add(Duration(seconds: hint > 0 ? hint : 30));
+      } else if (isAuthReject(c)) {
         _authFailed = true;
         lastAuthError = c;
         onAuthRejected?.call(c, msg);
