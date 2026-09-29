@@ -4,18 +4,31 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// 皮肤（换皮不换布局）：
 ///   A 深空玻璃 Dark Glass —— 深空蓝渐变底 + 玻璃卡 + 蓝→青辉光
+///   B 晨白 Clean Light —— 清爽白底 + 纯白卡轻投影 + 克制蓝
 ///   C 鲸蓝 Brand Splash —— 品牌渐变顶栏/抽屉 + 白卡大圆角 + 带色投影
-enum DshSkin { darkGlass, brandSplash }
+///   D 墨白 Mono Pro —— 黑白灰高对比 + 描边代投影 + 小圆角紧排版
+enum DshSkin { darkGlass, cleanLight, brandSplash, monoPro }
 
 extension DshSkinMeta on DshSkin {
   String get label => switch (this) {
         DshSkin.darkGlass => 'A · 深空玻璃',
+        DshSkin.cleanLight => 'B · 晨白',
         DshSkin.brandSplash => 'C · 鲸蓝',
+        DshSkin.monoPro => 'D · 墨白',
       };
 
   String get short => switch (this) {
         DshSkin.darkGlass => 'A',
+        DshSkin.cleanLight => 'B',
         DshSkin.brandSplash => 'C',
+        DshSkin.monoPro => 'D',
+      };
+
+  String get desc => switch (this) {
+        DshSkin.darkGlass => '深空蓝渐变 · 玻璃质感 · 蓝青辉光',
+        DshSkin.cleanLight => '清爽白底 · 白卡轻投影 · 克制蓝',
+        DshSkin.brandSplash => '品牌渐变顶栏 · 白卡大圆角 · 柔和投影',
+        DshSkin.monoPro => '黑白高对比 · 描边代投影 · 工程紧凑',
       };
 }
 
@@ -90,7 +103,9 @@ class SkinTokens extends ThemeExtension<SkinTokens> {
 class DshTheme {
   static ThemeData of(DshSkin skin) => switch (skin) {
         DshSkin.darkGlass => _darkGlass(),
+        DshSkin.cleanLight => _cleanLight(),
         DshSkin.brandSplash => _brandSplash(),
+        DshSkin.monoPro => _monoPro(),
       };
 }
 
@@ -315,6 +330,210 @@ ThemeData _brandSplash() {
   );
 }
 
+ThemeData _cleanLight() {
+  const c = _BColors();
+  final scheme = ColorScheme.fromSeed(
+    seedColor: c.primary,
+    brightness: Brightness.light,
+  ).copyWith(
+    primary: c.primary,
+    onPrimary: Colors.white,
+    primaryContainer: const Color(0xFFE8EEFF),
+    onPrimaryContainer: const Color(0xFF264FCF),
+    secondary: const Color(0xFF264FCF),
+    onSecondary: Colors.white,
+    surface: Colors.white,
+    onSurface: c.onSurface,
+    onSurfaceVariant: c.onSurfaceVariant,
+    surfaceContainerLowest: Colors.white,
+    surfaceContainerLow: const Color(0xFFF7F9FD),
+    surfaceContainer: const Color(0xFFF0F3FA),
+    surfaceContainerHigh: const Color(0xFFEDF1FA),
+    surfaceContainerHighest: Colors.white,
+    outlineVariant: const Color(0xFFE7EBF3),
+    error: const Color(0xFFDC2626),
+    onError: Colors.white,
+  );
+
+  final tokens = const SkinTokens(
+    name: 'B · 晨白',
+    appbarGradient: null,
+    drawerGradient: null,
+    composerFill: Colors.white,
+    composerBorder: Color(0xFFE7EBF3),
+    composerRadius: 24,
+    fieldRadius: 14,
+    cardRadius: 12,
+    userBubbleGradient: null,
+    glowColor: Color(0x403B6EF6),
+  );
+
+  return _base(
+    scheme: scheme,
+    tokens: tokens,
+    scaffoldBg: const Color(0xFFF4F6FB),
+    appBar: AppBarTheme(
+      backgroundColor: Colors.white,
+      foregroundColor: const Color(0xFF17233F),
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      systemOverlayStyle: SystemUiOverlayStyle.dark,
+      iconTheme: const IconThemeData(color: Color(0xFF46536F)),
+      actionsIconTheme: const IconThemeData(color: Color(0xFF46536F)),
+      shape: const Border(
+        bottom: BorderSide(color: Color(0xFFE7EBF3), width: 1),
+      ),
+    ),
+    card: CardThemeData(
+      color: Colors.white,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shadowColor: const Color(0x0D172B63),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Color(0xFFE7EBF3)),
+      ),
+    ),
+    input: InputDecorationTheme(
+      filled: true,
+      fillColor: Colors.white,
+      hintStyle: TextStyle(color: c.onSurfaceVariant),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFE2E7F1)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFE2E7F1)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: c.primary, width: 1.4),
+      ),
+    ),
+    divider: const DividerThemeData(color: Color(0xFFE7EBF3), thickness: 1),
+    filledButtonStyle: FilledButton.styleFrom(
+      backgroundColor: c.primary,
+      foregroundColor: Colors.white,
+      minimumSize: const Size.fromHeight(48),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+    ),
+    textButtonStyle: TextButton.styleFrom(foregroundColor: c.primary),
+    iconButtonColor: const Color(0xFF46536F),
+    dialogBg: Colors.white,
+    dialogRadius: 16,
+    snackBarBg: const Color(0xFF17233F),
+  );
+}
+
+ThemeData _monoPro() {
+  const c = _DColors();
+  final scheme = ColorScheme.fromSeed(
+    seedColor: const Color(0xFF2563EB),
+    brightness: Brightness.light,
+  ).copyWith(
+    primary: c.ink,
+    onPrimary: Colors.white,
+    primaryContainer: const Color(0xFFEDEDED),
+    onPrimaryContainer: c.ink,
+    secondary: c.actionBlue,
+    onSecondary: Colors.white,
+    surface: Colors.white,
+    onSurface: c.ink,
+    onSurfaceVariant: const Color(0xFF5C5C5C),
+    surfaceContainerLowest: Colors.white,
+    surfaceContainerLow: const Color(0xFFFAFAFA),
+    surfaceContainer: const Color(0xFFF2F2F2),
+    surfaceContainerHigh: const Color(0xFFF0F0F0),
+    surfaceContainerHighest: Colors.white,
+    outlineVariant: const Color(0xFFE6E6E6),
+    error: const Color(0xFFDC2626),
+    onError: Colors.white,
+  );
+
+  final tokens = const SkinTokens(
+    name: 'D · 墨白',
+    appbarGradient: null,
+    drawerGradient: null,
+    composerFill: Colors.white,
+    composerBorder: Color(0xFF141414),
+    composerRadius: 12,
+    fieldRadius: 9,
+    cardRadius: 9,
+    userBubbleGradient: null,
+    glowColor: null, // 墨白：描边代替投影
+  );
+
+  return _base(
+    scheme: scheme,
+    tokens: tokens,
+    scaffoldBg: const Color(0xFFFAFAFA),
+    appBar: AppBarTheme(
+      backgroundColor: Colors.white,
+      foregroundColor: c.ink,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      systemOverlayStyle: SystemUiOverlayStyle.dark,
+      iconTheme: IconThemeData(color: c.ink),
+      actionsIconTheme: IconThemeData(color: c.ink),
+      titleTextStyle: TextStyle(
+        color: c.ink,
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.2,
+      ),
+      shape: const Border(
+        bottom: BorderSide(color: Color(0xFFE6E6E6), width: 1),
+      ),
+    ),
+    card: CardThemeData(
+      color: Colors.white,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(9),
+        side: const BorderSide(color: Color(0xFFE6E6E6)),
+      ),
+    ),
+    input: InputDecorationTheme(
+      filled: true,
+      fillColor: Colors.white,
+      hintStyle: const TextStyle(color: Color(0xFF9A9A9A)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(9),
+        borderSide: const BorderSide(color: Color(0xFFDADADA)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(9),
+        borderSide: const BorderSide(color: Color(0xFFDADADA)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(9),
+        borderSide: BorderSide(color: c.ink, width: 1.5),
+      ),
+    ),
+    divider: const DividerThemeData(color: Color(0xFFE6E6E6), thickness: 1),
+    filledButtonStyle: FilledButton.styleFrom(
+      backgroundColor: c.ink,
+      foregroundColor: Colors.white,
+      minimumSize: const Size.fromHeight(48),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      textStyle: const TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 1),
+    ),
+    textButtonStyle: TextButton.styleFrom(foregroundColor: c.actionBlue),
+    iconButtonColor: c.ink,
+    dialogBg: Colors.white,
+    dialogRadius: 12,
+    snackBarBg: c.ink,
+  );
+}
+
 ThemeData _base({
   required ColorScheme scheme,
   required SkinTokens tokens,
@@ -390,6 +609,20 @@ class _CColors {
   final onSurface = const Color(0xFF152347);
   final onSurfaceVariant = const Color(0xFF43537C);
   final hairline = const Color(0xFFE4EBFB);
+}
+
+class _BColors {
+  const _BColors();
+  final primary = const Color(0xFF3B6EF6);
+  final surface = Colors.white;
+  final onSurface = const Color(0xFF1B2437);
+  final onSurfaceVariant = const Color(0xFF5A6A8C);
+}
+
+class _DColors {
+  const _DColors();
+  final ink = const Color(0xFF141414);
+  final actionBlue = const Color(0xFF2563EB);
 }
 
 /// 皮肤选择持久化（SharedPreferences，key=dsh_skin）。

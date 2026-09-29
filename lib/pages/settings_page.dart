@@ -63,16 +63,9 @@ class SettingsPage extends StatelessWidget {
             ),
           ]),
 
-          // ── 外观（皮肤）──
+          // ── 外观（皮肤，下拉四选一）──
           _section(context, '外观', [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-              child: _skinCard(context, DshSkin.darkGlass),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-              child: _skinCard(context, DshSkin.brandSplash),
-            ),
+            _skinDropdown(context),
           ]),
 
           // ── 拓展位：新分组在此追加（通知 / 存储 / 调试 …）──
@@ -157,68 +150,47 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  /// 皮肤选择卡：点按即时换肤 + 落盘（与抽屉原快捷切换同一机制）。
-  Widget _skinCard(BuildContext context, DshSkin skin) {
+  /// 皮肤下拉：四选一（A/B/C/D），点选即时换肤 + 落盘。
+  Widget _skinDropdown(BuildContext context) {
     return ValueListenableBuilder<DshSkin>(
       valueListenable: skinNotifier,
       builder: (context, current, _) {
         final theme = Theme.of(context);
-        final selected = current == skin;
-        final accent = theme.colorScheme.primary;
-        return Material(
-          color: selected
-              ? accent.withValues(alpha: 0.10)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              skinNotifier.value = skin;
-              SkinStore.save(skin);
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                    color: selected ? accent : theme.colorScheme.outlineVariant,
-                    width: selected ? 1.5 : 1),
-              ),
-              child: Row(children: [
-                Icon(
-                  skin == DshSkin.darkGlass
-                      ? Icons.dark_mode_outlined
-                      : Icons.wb_sunny_outlined,
-                  size: 20,
-                  color: selected ? accent : theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(skin.label,
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                                fontWeight: selected
-                                    ? FontWeight.w700
-                                    : FontWeight.w400)),
-                        const SizedBox(height: 2),
-                        Text(
-                          skin == DshSkin.darkGlass
-                              ? '深空蓝渐变 · 玻璃质感 · 蓝青辉光'
-                              : '品牌渐变顶栏 · 白卡大圆角 · 柔和投影',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant),
-                        ),
-                      ]),
-                ),
-                if (selected) ...[
-                  const SizedBox(width: 8),
-                  Icon(Icons.check_circle, color: accent, size: 20),
-                ],
-              ]),
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(children: [
+            Icon(Icons.palette_outlined,
+                size: 20, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('皮肤', style: theme.textTheme.bodyLarge),
+                    const SizedBox(height: 2),
+                    Text(current.desc,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant)),
+                  ]),
             ),
-          ),
+            const SizedBox(width: 8),
+            DropdownButton<DshSkin>(
+              value: current,
+              underline: const SizedBox.shrink(),
+              icon: Icon(Icons.expand_more,
+                  color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodyMedium,
+              items: [
+                for (final s in DshSkin.values)
+                  DropdownMenuItem(value: s, child: Text(s.label)),
+              ],
+              onChanged: (s) {
+                if (s == null) return;
+                skinNotifier.value = s;
+                SkinStore.save(s);
+              },
+            ),
+          ]),
         );
       },
     );
