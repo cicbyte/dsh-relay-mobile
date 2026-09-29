@@ -155,6 +155,8 @@ ThemeData _darkGlass() {
       scrolledUnderElevation: 0,
       centerTitle: false,
       systemOverlayStyle: SystemUiOverlayStyle.light,
+      iconTheme: const IconThemeData(color: Color(0xFFDCE6F8)),
+      actionsIconTheme: const IconThemeData(color: Color(0xFFDCE6F8)),
       shape: const Border(
         bottom: BorderSide(color: Color(0x12FFFFFF), width: 1),
       ),
@@ -263,6 +265,8 @@ ThemeData _brandSplash() {
       scrolledUnderElevation: 0,
       centerTitle: false,
       systemOverlayStyle: SystemUiOverlayStyle.light,
+      iconTheme: const IconThemeData(color: Colors.white),
+      actionsIconTheme: const IconThemeData(color: Colors.white),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
       ),
@@ -337,9 +341,8 @@ ThemeData _base({
     dividerTheme: divider,
     filledButtonTheme: FilledButtonThemeData(style: filledButtonStyle),
     textButtonTheme: TextButtonThemeData(style: textButtonStyle),
-    iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(foregroundColor: iconButtonColor),
-    ),
+    // 注意：**不设**全局 IconButtonTheme.foregroundColor——它会压制 AppBar 图标色
+    // （iconTheme/actionsIconTheme），在渐变顶栏上产生灰对蓝低对比。
     dialogTheme: DialogThemeData(
       backgroundColor: dialogBg,
       elevation: 8,
@@ -375,7 +378,7 @@ class _AColors {
   final secondary = const Color(0xFF4CC2FF);
   final surface = const Color(0xFF0B1628);
   final onSurface = const Color(0xFFE9EFFA);
-  final onSurfaceVariant = const Color(0xFF8FA5CC);
+  final onSurfaceVariant = const Color(0xFFA9BCE2);
   final glassBase = const Color(0xFF16233F);
 }
 
@@ -385,7 +388,7 @@ class _CColors {
   final secondary = const Color(0xFF38BDF8);
   final surface = const Color(0xFFF6F8FE);
   final onSurface = const Color(0xFF152347);
-  final onSurfaceVariant = const Color(0xFF5A6B96);
+  final onSurfaceVariant = const Color(0xFF43537C);
   final hairline = const Color(0xFFE4EBFB);
 }
 

@@ -349,9 +349,9 @@ class DshDrawer extends StatelessWidget {
                       child: ChoiceChip(
                         label: Text('${s.short} ${s.label.split('·').last.trim()}',
                             style: TextStyle(
-                                fontSize: 11,
+                                fontSize: 12.5,
                                 fontWeight:
-                                    skin == s ? FontWeight.w600 : FontWeight.w400,
+                                    skin == s ? FontWeight.w700 : FontWeight.w500,
                                 color: skin == s
                                     ? (gradientPanel
                                         ? theme.colorScheme.primary
@@ -359,14 +359,17 @@ class DshDrawer extends StatelessWidget {
                                     : onPanel)),
                         selected: skin == s,
                         showCheckmark: false,
-                        // 渐变面板上白底蓝字、暗/浅面板上蓝底白字；未选=描边透明底
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+                        // 高对比胶囊：选中=实底反色，未选=半实底+描边（渐变/暗面板各配）
                         selectedColor: gradientPanel
                             ? Colors.white
                             : theme.colorScheme.primary,
-                        backgroundColor: Colors.transparent,
+                        backgroundColor: gradientPanel
+                            ? Colors.white.withValues(alpha: 0.22)
+                            : onPanel.withValues(alpha: 0.12),
                         side: BorderSide(
-                            color: onPanelDim.withValues(alpha: 0.45)),
-                        visualDensity: VisualDensity.compact,
+                            color: onPanelDim.withValues(alpha: 0.55)),
+                        visualDensity: VisualDensity.standard,
                         onSelected: (_) {
                           skinNotifier.value = s;
                           SkinStore.save(s);
