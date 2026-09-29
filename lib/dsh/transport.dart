@@ -202,6 +202,20 @@ class RelayTransport extends DshTransport {
   /// 严禁把重连风暴喂进服务端限流窗口（活锁：越喂越限、越限越喂）
   DateTime? _retryNotBefore;
 
+  // ---- v3 续传/批量 ----
+  /// 已处理的最大下行 seq（重连 hello.resumeFrom 断点）
+  int _lastSeq = 0;
+
+  /// relay 是否收 batch 信封（welcome.batch 能力位）
+  bool _relayBatch = false;
+
+  /// 断线期隧道上行排队（重连后 flush；溢出拆流重建）
+  final List<String> _outQueue = [];
+
+  /// 闪断自动重连（隧道跨断线存活的前提）：单飞 + 指数退避
+  Timer? _reconnectTimer;
+  int _backoffMs = 1000;
+
   /// 配对成功后本实例持有的设备身份（供上层落盘后下次重连复用）
   String? pairedDeviceId;
   String? pairedToken;
@@ -259,6 +273,8 @@ class RelayTransport extends DshTransport {
       'type': 'hello',
       'role': 'client',
       if (name.isNotEmpty) 'name': name,
+      'batch': true,
+      'resumeFrom': _lastSeq,
     };
     final useToken = deviceId.isNotEmpty && token.isNotEmpty;
     if (useToken) {
@@ -278,10 +294,18 @@ class RelayTransport extends DshTransport {
       final c = '${verdict['code'] ?? 'rejected'}';
       final msg = relayRejectMessage(c);
       if (c == 'rate-limited') {
-        // 尊重服务端 retryAfterSecs（缺省 30s）：冷却期内本地快速失败，不喂限流窗口
+        // 尊重服务端 retryAfterSecs（缺省 30s）：冷却期内本地快速失败，不喂限流窗口。
+        // 只拆连接不判死刑：冷却是暂态，实例保持可重用
         final hint = (verdict['retryAfterSecs'] as num?)?.toInt() ?? 0;
         _retryNotBefore = DateTime.now().add(Duration(seconds: hint > 0 ? hint : 30));
-      } else if (isAuthReject(c)) {
+        final ws = _ws;
+        _ws = null;
+        try {
+          await ws?.close();
+        } catch (_) {}
+        throw TransportException('relay/rate-limited', '尝试过于频繁：请稍后再试');
+      }
+      if (isAuthReject(c)) {
         _authFailed = true;
         lastAuthError = c;
         onAuthRejected?.call(c, msg);
@@ -296,6 +320,10 @@ class RelayTransport extends DshTransport {
       pairedToken = '${dev['token']}';
       onPaired?.call(pairedDeviceId!, pairedToken!);
     }
+    // v3：能力位 + 退避复位 + 断线期队列补发
+    _relayBatch = verdict['batch'] == true;
+    _backoffMs = 1000;
+    _flushQueue();
   }
 
   /// 断线后惰性重拨（request/openSocket 先调用）；鉴权失败不重拨。
@@ -306,7 +334,30 @@ class RelayTransport extends DshTransport {
   }
 
   void _dispatch(Map<String, dynamic> frame) {
+    // v3：推进续传断点（隧道帧带 seq；batch 内层递归同样计数）
+    final seq = frame['seq'];
+    if (seq is num && seq.toInt() > _lastSeq) _lastSeq = seq.toInt();
     switch (frame['type']) {
+      case 'batch':
+        // v3 批量信封：展开内层逐帧处理
+        for (final s in (frame['frames'] as List? ?? const [])) {
+          if (s is! String) continue;
+          try {
+            _dispatch(jsonDecode(s) as Map<String, dynamic>);
+          } catch (_) {}
+        }
+        return;
+      case 'resume':
+        // v3 续传判定：ok=false 断点不可满足（环溢出/重启）→ 旧隧道作废重建
+        if (frame['ok'] != true) {
+          for (final sc in _sockets.values) {
+            if (!sc.isClosed) sc.addError(TransportException('relay/resume-reset', '中继续传断点失效，请重建连接'));
+            sc.close();
+          }
+          _sockets.clear();
+          _outQueue.clear();
+        }
+        return;
       case 'welcome':
       case 'reject':
       case 'peer':
@@ -337,15 +388,70 @@ class RelayTransport extends DshTransport {
   void _handleDisconnect() {
     if (_closed) return;
     _ws = null;
+    // 请求/响应对语义不允许跨连接续传：立即失败。
+    // 隧道流（mux）**保活**——闪断由自动重连 + 服务端回放无缝续流，上层无感
     for (final c in _pending.values) {
       c.complete({'type': 'error', 'code': 'relay/disconnected', 'message': 'relay 连接断开'});
     }
     _pending.clear();
-    for (final sc in _sockets.values) {
-      sc.addError(TransportException('relay/disconnected', 'relay 连接断开'));
-      sc.close();
+    _scheduleReconnect();
+  }
+
+  /// 闪断自动重连（单飞）：指数退避；限流冷却按服务端提示顺延
+  void _scheduleReconnect() {
+    if (_closed || _authFailed || _reconnectTimer != null) return;
+    _reconnectTimer = Timer(Duration(milliseconds: _backoffMs), () async {
+      _reconnectTimer = null;
+      if (_closed || _authFailed) return;
+      try {
+        await connect();
+      } on TransportException catch (e) {
+        if (e.code == 'relay/rate-limited') {
+          final nb = _retryNotBefore;
+          final waitMs = nb == null ? _backoffMs : nb.difference(DateTime.now()).inMilliseconds + 200;
+          _backoffMs = waitMs.clamp(1000, 60000);
+        } else {
+          _backoffMs = (_backoffMs * 2).clamp(1000, 30000);
+        }
+        _scheduleReconnect();
+      } catch (_) {
+        _backoffMs = (_backoffMs * 2).clamp(1000, 30000);
+        _scheduleReconnect();
+      }
+    });
+  }
+
+  /// 隧道帧上行：在线直发；断线排队（重连后补发，溢出拆流重建）
+  void _sendTunnelFrame(Map<String, dynamic> frame) {
+    final msg = jsonEncode(frame);
+    final ws = _ws;
+    if (ws != null) {
+      ws.add(msg);
+      return;
     }
-    _sockets.clear();
+    if (_closed) return;
+    if (_outQueue.length < 512) {
+      _outQueue.add(msg);
+      return;
+    }
+    final rid = '${frame['rid']}';
+    final sc = _sockets.remove(rid);
+    sc?.addError(TransportException('relay/overflow', '断线缓冲溢出'));
+    sc?.close();
+  }
+
+  void _flushQueue() {
+    final ws = _ws;
+    if (ws == null || _outQueue.isEmpty) return;
+    // 断线积压补发天然是小帧风暴：支持 batch 时合并成一个 WS 消息
+    if (_relayBatch && _outQueue.length > 1) {
+      ws.add(jsonEncode({'type': 'batch', 'frames': List<String>.from(_outQueue)}));
+    } else {
+      for (final msg in _outQueue) {
+        ws.add(msg);
+      }
+    }
+    _outQueue.clear();
   }
 
   @override
@@ -397,12 +503,15 @@ class RelayTransport extends DshTransport {
   void _closeSocket(String rid) {
     final sc = _sockets.remove(rid);
     sc?.close();
-    _ws?.add(jsonEncode({'type': 'ws-close', 'rid': rid}));
+    _sendTunnelFrame({'type': 'ws-close', 'rid': rid});
   }
 
   @override
   Future<void> close() async {
     _closed = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _outQueue.clear();
     _ws?.close();
     _ws = null;
     for (final sc in _sockets.values) {
@@ -422,7 +531,7 @@ class _RelaySocket implements TransportSocket {
   Stream<String> get messages => _sc.stream;
 
   @override
-  void send(String text) => _t._ws?.add(jsonEncode({'type': 'ws-frame', 'rid': _rid, 'text': text}));
+  void send(String text) => _t._sendTunnelFrame({'type': 'ws-frame', 'rid': _rid, 'text': text});
 
   @override
   Future<void> close([int? code, String? reason]) async => _t._closeSocket(_rid);
