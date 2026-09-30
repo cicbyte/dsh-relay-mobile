@@ -253,6 +253,8 @@ class RelayTransport extends DshTransport {
     _ws = ws;
     ws.listen(
       (data) {
+        // 旧 socket 迟到的帧不得进入当前传输（同设备顶替的 bye 竞态，见 _handleDisconnect）
+        if (!identical(_ws, ws)) return;
         if (data is! String) return;
         Map<String, dynamic> frame;
         try {
@@ -262,8 +264,8 @@ class RelayTransport extends DshTransport {
         }
         _dispatch(frame);
       },
-      onDone: _handleDisconnect,
-      onError: (_) => _handleDisconnect(),
+      onDone: () => _handleDisconnect(ws),
+      onError: (_) => _handleDisconnect(ws),
       cancelOnError: true,
     );
     // hello v2：令牌重连 / 配对码首配走设备凭证，**必须省略 code**——
@@ -385,8 +387,11 @@ class RelayTransport extends DshTransport {
     }
   }
 
-  void _handleDisconnect() {
+  void _handleDisconnect([Object? source]) {
     if (_closed) return;
+    // 旧 socket 迟到的 onDone/onError 不得拆掉当前传输：否则 _ws 被清空、在途 RPC
+    // 全判「relay 连接断开」，且另起重连造成同设备顶替风暴（relay audit 实锤每秒 open/close）
+    if (source != null && !identical(_ws, source)) return;
     _ws = null;
     // 请求/响应对语义不允许跨连接续传：立即失败。
     // 隧道流（mux）**保活**——闪断由自动重连 + 服务端回放无缝续流，上层无感
