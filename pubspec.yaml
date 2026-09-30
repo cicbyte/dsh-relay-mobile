@@ -49,6 +49,7 @@ dependencies:
   # 局域网自动发现（mDNS/NSD，_dsh._tcp）
   nsd: ^5.0.1
   file_picker: ^8.0.0
+  scrollable_positioned_list: ^0.3.8
 
 dev_dependencies:
   flutter_test:

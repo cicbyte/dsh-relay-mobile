@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 
 import 'package:flutter/material.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../device_info.dart';
 import '../dsh/dsh_client.dart';
@@ -12,6 +13,7 @@ import '../dsh/interactions.dart';
 import '../theme.dart';
 import '../widgets/interaction_composer.dart';
 import '../widgets/markdown_text.dart';
+import '../widgets/turn_rail.dart';
 import 'trajectory_page.dart';
 
 /// 会话页：session/follow（快照+事件订阅）渲染对话，session/prompt 发消息。
@@ -48,7 +50,15 @@ class _SessionPageState extends State<SessionPage> {
   bool _sending = false;
   String? _error;
   final _inputCtrl = TextEditingController();
-  final _scrollCtrl = ScrollController();
+  // ---- 轮次导航（对齐桌面 TurnNavigator）----
+  final _itemScrollCtrl = ItemScrollController();
+  final _itemPositions = ItemPositionsListener.create();
+  int _itemCount = 0;
+  List<TurnRailItem> _turnItems = const [];
+  final _turnStartIndex = <int, int>{};
+  List<int?> _indexTurn = const [];
+  int? _activeTurn;
+  DateTime _lastSpy = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// subagent 会话的 address 需要 mode（one-shot / continuable），失败时按序兜底。
   int _modeIdx = 0;
@@ -157,6 +167,7 @@ class _SessionPageState extends State<SessionPage> {
     _mux = DshMux(widget.client);
     InteractionCenter.I.ensureStarted(widget.client);
     _inputCtrl.addListener(_onInputChanged);
+    _itemPositions.itemPositions.addListener(_onPositions);
     // 断线自动重连后自动重订阅（避免人工点重试）
     _mux.onReconnected = _openFollow;
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -171,9 +182,9 @@ class _SessionPageState extends State<SessionPage> {
     _sub?.cancel();
     _controlSub?.cancel();
     _inputCtrl.removeListener(_onInputChanged);
+    _itemPositions.itemPositions.removeListener(_onPositions);
     _mux.close();
     _inputCtrl.dispose();
-    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -264,13 +275,44 @@ class _SessionPageState extends State<SessionPage> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollCtrl.hasClients) return;
-      _scrollCtrl.animateTo(
-        _scrollCtrl.position.maxScrollExtent,
+      if (!_itemScrollCtrl.isAttached || _itemCount == 0) return;
+      _itemScrollCtrl.scrollTo(
+        index: _itemCount - 1,
+        alignment: 1,
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
       );
     });
+  }
+
+  /// 跳到某轮起点（轮次轨点按）。
+  void _jumpToTurn(int turn) {
+    final idx = _turnStartIndex[turn];
+    if (idx == null || !_itemScrollCtrl.isAttached) return;
+    _itemScrollCtrl.scrollTo(
+      index: idx,
+      alignment: 0.08,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  /// 滚动跟随：可视区最靠上的行归属轮 = 当前轮（驱动轮次轨高亮）。
+  void _onPositions() {
+    final now = DateTime.now();
+    if (now.difference(_lastSpy).inMilliseconds < 150) return;
+    _lastSpy = now;
+    int? top;
+    for (final p in _itemPositions.itemPositions.value) {
+      if (p.itemLeadingEdge <= 0.15 && (top == null || p.index > top)) {
+        top = p.index;
+      }
+    }
+    if (top == null || top >= _indexTurn.length) return;
+    final t = _indexTurn[top];
+    if (t != null && t != 0 && t != _activeTurn) {
+      setState(() => _activeTurn = t);
+    }
   }
 
   /// 向前翻一页历史：throughSeq=快照 cursor，beforeSeq=当前最老 seq。
@@ -1451,8 +1493,36 @@ class _SessionPageState extends State<SessionPage> {
 
     // Pass 2: 生成 widgets（工具卡以条目级 emitted 去重，配对结果不再出独立卡）
     final out = <Widget>[];
+
+    // ---- 轮次导航推导（对齐桌面 TurnNavigationItem）----
+    // 人工提问起轮（无轮次事件的老会话同样成立）；data['turn']/turn/start 只作编号与分界装饰。
+    var curTurn = 0;
+    var autoTurn = 0;
+    final prompts = <int, String>{};
+    final responses = <int, String>{};
+    final turnStartIdx = <int, int>{};
+    final idxTurn = <int>[];
     for (final r in records) {
       if (r.ignorable) continue;
+      final markLen = out.length;
+      // 归轮：事件显式 data['turn'] 透传（轨迹页同款：缺失沿用上一个）；
+      // 无显式轮号时人工提问起轮（老会话兜底）。
+      final explicitTurn = int.tryParse('${r.data['turn'] ?? ''}');
+      var isHuman = false;
+      if (r.type == 'user/message') {
+        final src = Map<String, dynamic>.from(r.data['source'] as Map? ?? {});
+        isHuman = src['kind'] == null || src['kind'] == 'user';
+      }
+      if (explicitTurn != null) {
+        curTurn = explicitTurn;
+      } else if (isHuman) {
+        autoTurn += 1;
+        // 轮号对齐：turn/start 已预置的空轮（有分界未有提示词）由紧随的提问继承
+        final reuse = curTurn != 0 &&
+            (prompts[curTurn] ?? '').isEmpty &&
+            turnStartIdx.containsKey(curTurn);
+        curTurn = reuse ? curTurn : autoTurn;
+      }
       switch (r.type) {
         case 'user/message':
           // source.kind 区分人工提问与合成注入（文件变动通知、skill、cron 等）：
@@ -1525,7 +1595,52 @@ class _SessionPageState extends State<SessionPage> {
         default:
           out.add(_systemTile(r));
       }
+      // 行→轮归属 + 轮锚点/预览摘录
+      for (var k = markLen; k < out.length; k++) {
+        idxTurn.add(curTurn);
+      }
+      if (curTurn != 0) {
+        // 该轮首个可见行即锚点；turn/start 分界行若在则首选
+        if (out.length > markLen && !turnStartIdx.containsKey(curTurn)) {
+          turnStartIdx[curTurn] = markLen;
+        }
+        if (r.type == 'turn/start' && out.length > markLen) {
+          turnStartIdx[curTurn] = markLen;
+        }
+        if (isHuman) {
+          final t = _contentText(r.data['content']).trim();
+          if (t.isNotEmpty && (prompts[curTurn] ?? '').isEmpty) {
+            prompts[curTurn] = t.split('\n').first;
+          }
+        } else if (r.type == 'assistant/message') {
+          final msg = Map<String, dynamic>.from(r.data['message'] as Map? ?? {});
+          for (final b in msg['content'] as List? ?? const []) {
+            if (b is Map && b['type'] == 'text') {
+              final t = '${b['text'] ?? ''}'.trim();
+              if (t.isNotEmpty && (responses[curTurn] ?? '').isEmpty) {
+                responses[curTurn] = t.split('\n').first;
+                break;
+              }
+            }
+          }
+        }
+      }
     }
+    // 轮次导航项（升序；锚点行索引 = items 索引）
+    final turns = turnStartIdx.keys.toList()..sort();
+    _turnItems = [
+      for (final t in turns)
+        TurnRailItem(
+          turn: t,
+          prompt: prompts[t] ?? '',
+          response: responses[t] ?? '',
+        ),
+    ];
+    _turnStartIndex
+      ..clear()
+      ..addAll(turnStartIdx);
+    _indexTurn = List<int?>.from(idxTurn);
+    _itemCount = out.length;
     return out;
   }
 
@@ -2041,12 +2156,27 @@ class _SessionPageState extends State<SessionPage> {
                 ? const Center(child: CircularProgressIndicator())
                 : Builder(builder: (_) {
                     final items = _buildItems(records);
-                    return ListView.builder(
-                      controller: _scrollCtrl,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: items.length,
-                      itemBuilder: (_, i) => items[i],
-                    );
+                    return Stack(children: [
+                      ScrollablePositionedList.builder(
+                        itemScrollController: _itemScrollCtrl,
+                        itemPositionsListener: _itemPositions,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: items.length,
+                        itemBuilder: (_, i) => items[i],
+                      ),
+                      // 轮次导航轨（≥2 轮才显示，对齐桌面）
+                      if (_turnItems.length >= 2)
+                        Positioned.fill(
+                          child: TurnRail(
+                            items: _turnItems,
+                            activeTurn: _activeTurn,
+                            runningTurn: _running && _turnItems.isNotEmpty
+                                ? _turnItems.last.turn
+                                : null,
+                            onJump: _jumpToTurn,
+                          ),
+                        ),
+                    ]);
                   }),
           ),
           if (_running)
