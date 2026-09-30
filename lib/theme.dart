@@ -30,6 +30,26 @@ extension DshSkinMeta on DshSkin {
         DshSkin.brandSplash => '品牌渐变顶栏 · 白卡大圆角 · 柔和投影',
         DshSkin.monoPro => '黑白高对比 · 描边代投影 · 工程紧凑',
       };
+
+  /// 迷你色板（外观页单选行预览）：(底色, 强调色)。
+  ({Color bg, Color accent}) get swatch => switch (this) {
+        DshSkin.darkGlass => (
+            bg: const Color(0xFF0B1326),
+            accent: const Color(0xFF5B8CFF)
+          ),
+        DshSkin.cleanLight => (
+            bg: const Color(0xFFF4F6FB),
+            accent: const Color(0xFF3B6EF6)
+          ),
+        DshSkin.brandSplash => (
+            bg: const Color(0xFFF6F8FE),
+            accent: const Color(0xFF4F6BED)
+          ),
+        DshSkin.monoPro => (
+            bg: const Color(0xFFFAFAFA),
+            accent: const Color(0xFF141414)
+          ),
+      };
 }
 
 /// 皮肤令牌：ThemeData 表达不了的视觉（渐变 / 玻璃面 / 描边 / 专用圆角）。

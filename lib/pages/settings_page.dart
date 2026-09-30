@@ -3,15 +3,17 @@ import 'package:flutter/material.dart';
 import '../dsh/dsh_client.dart';
 import '../dsh/transport.dart';
 import '../theme.dart';
+import '../widgets/settings_ui.dart';
+import 'appearance_page.dart';
 import 'connect_page.dart';
 
 /// 设置中枢（分组卡片式）：
 ///   连接 → 连接设置子页（push）
-///   外观 → 皮肤 A/C 选择卡（走皮肤令牌体系，双皮肤自适配）
+///   外观 → 外观子页（主题四选一 + 拓展位）
 ///   关于 → 版本/协议
 ///
-/// 拓展方式：在 ListView 里按 `_section('标题', [...])` 追加分组或条目即可，
-/// 分组容器/条目样式全部吃 ThemeData + SkinTokens，新皮肤自动适配。
+/// 拓展方式：按 `SettingsSection('标题', [...])` 追加分组或条目即可，
+/// 全部吃 ThemeData + SkinTokens，新皮肤自动适配。
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
     super.key,
@@ -45,168 +47,72 @@ class SettingsPage extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
           // ── 连接 ──
-          _section(context, '连接', [
-            _tile(
-              context,
-              icon: Icons.link,
-              title: '连接设置',
-              subtitle: connected ? modeLabel : '未连接 · 点此配置入网',
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {
-                Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => ConnectPage(
-                    onConnected: onConnected,
-                    onOpenDrawer: onOpenDrawer,
-                  ),
-                ));
-              },
-            ),
-          ]),
+          SettingsSection(
+            title: '连接',
+            children: [
+              SettingsTile(
+                icon: Icons.link,
+                title: '连接设置',
+                subtitle: connected ? modeLabel : '未连接 · 点此配置入网',
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => ConnectPage(
+                      onConnected: onConnected,
+                      onOpenDrawer: onOpenDrawer,
+                    ),
+                  ));
+                },
+              ),
+            ],
+          ),
 
-          // ── 外观（皮肤，下拉四选一）──
-          _section(context, '外观', [
-            _skinDropdown(context),
-          ]),
+          // ── 外观 ──
+          SettingsSection(
+            title: '外观',
+            children: [
+              ValueListenableBuilder<DshSkin>(
+                valueListenable: skinNotifier,
+                builder: (context, current, _) => SettingsTile(
+                  icon: Icons.palette_outlined,
+                  title: '主题',
+                  subtitle: current.desc,
+                  trailing: SettingsValueLink(value: current.short),
+                  onTap: () {
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => const AppearancePage(),
+                    ));
+                  },
+                ),
+              ),
+            ],
+          ),
 
           // ── 拓展位：新分组在此追加（通知 / 存储 / 调试 …）──
-          _section(context, '关于', [
-            _tile(context,
+          SettingsSection(
+            title: '关于',
+            children: [
+              SettingsTile(
                 icon: Icons.info_outline,
                 title: '版本',
-                trailing: const _ValueText('1.0.0+1')),
-            Divider(height: 1, indent: 56, color: Theme.of(context).colorScheme.outlineVariant),
-            _tile(context,
+                trailing: _value(context, '1.0.0+1'),
+              ),
+              settingsDivider(context),
+              SettingsTile(
                 icon: Icons.hub_outlined,
                 title: '协议',
-                trailing: const _ValueText('WS v3 · 恢复/批量/序号')),
-          ]),
-        ],
-      ),
-    );
-  }
-
-  /// 分组卡片：标题 + 圆角容器（装饰吃主题，双皮肤自适配）。
-  Widget _section(BuildContext context, String title, List<Widget> children) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
-            child: Text(title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600)),
-          ),
-          Container(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: theme.colorScheme.outlineVariant),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(children: children),
+                trailing: _value(context, 'WS v3 · 恢复/批量/序号'),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  /// 设置条目：左图标 + 标题/副标题 + 右侧值或箭头。
-  Widget _tile(
-    BuildContext context, {
-    required IconData icon,
-    required String title,
-    String? subtitle,
-    Widget? trailing,
-    VoidCallback? onTap,
-  }) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        child: Row(children: [
-          Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: theme.textTheme.bodyLarge),
-              if (subtitle != null) ...[
-                const SizedBox(height: 2),
-                Text(subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-              ],
-            ]),
-          ),
-          if (trailing != null) ...[const SizedBox(width: 8), trailing],
-        ]),
-      ),
-    );
-  }
-
-  /// 皮肤下拉：四选一（A/B/C/D），点选即时换肤 + 落盘。
-  Widget _skinDropdown(BuildContext context) {
-    return ValueListenableBuilder<DshSkin>(
-      valueListenable: skinNotifier,
-      builder: (context, current, _) {
-        final theme = Theme.of(context);
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(children: [
-            Icon(Icons.palette_outlined,
-                size: 20, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('皮肤', style: theme.textTheme.bodyLarge),
-                    const SizedBox(height: 2),
-                    Text(current.desc,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant)),
-                  ]),
-            ),
-            const SizedBox(width: 8),
-            DropdownButton<DshSkin>(
-              value: current,
-              underline: const SizedBox.shrink(),
-              icon: Icon(Icons.expand_more,
-                  color: theme.colorScheme.onSurfaceVariant),
-              style: theme.textTheme.bodyMedium,
-              items: [
-                for (final s in DshSkin.values)
-                  DropdownMenuItem(value: s, child: Text(s.label)),
-              ],
-              onChanged: (s) {
-                if (s == null) return;
-                skinNotifier.value = s;
-                SkinStore.save(s);
-              },
-            ),
-          ]),
-        );
-      },
-    );
-  }
-}
-
-class _ValueText extends StatelessWidget {
-  const _ValueText(this.value);
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(value,
-        style: Theme.of(context)
-            .textTheme
-            .bodySmall
-            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant));
-  }
+  Widget _value(BuildContext context, String text) => Text(text,
+      style: Theme.of(context)
+          .textTheme
+          .bodySmall
+          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant));
 }
