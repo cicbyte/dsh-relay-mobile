@@ -204,7 +204,16 @@ class _AppRootState extends State<AppRoot> {
       body: ValueListenableBuilder<int>(
         valueListenable: tabIndex,
         builder: (context, index, _) {
-          return IndexedStack(
+          return PopScope(
+            // 返回/左滑手势：设置页（tab 1）拦截返回并切回上次 session（tab 0），
+            // 会话页（tab 0）放行 pop=退出。PopScope 在 ValueListenableBuilder 内侧，
+            // 随 tabIndex 变化重建，canPop 才能实时反映当前 tab。
+            canPop: index == 0,
+            onPopInvokedWithResult: (bool didPop, Object? result) {
+              if (didPop) return; // 会话页正常退出，无需处理
+              tabIndex.value = 0; // 设置页被拦截 → 回到上次 session
+            },
+            child: IndexedStack(
             index: index,
             children: [
               client == null || _selected == null
@@ -227,6 +236,7 @@ class _AppRootState extends State<AppRoot> {
                 connected: client != null,
               ),
             ],
+          ),
           );
         },
       ),
