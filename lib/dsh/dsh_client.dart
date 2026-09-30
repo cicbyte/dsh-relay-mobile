@@ -81,6 +81,42 @@ class DshClient {
     }
   }
 
+  /// 工作区快速路径（环回限定，经隧道）：{ quick: [...], roots: [...], platform, home }。
+  /// 插件旧版本/路由不可用返回 null，调用方回退默认工作区。
+  Future<Map<String, dynamic>?> workspaceRoots() async {
+    try {
+      final resp = await transport.request('GET', '/mobile-bridge/workspace-roots');
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 列子目录（环回限定，经隧道）：{ ok, path, parent, dirs: [{path,label}] }。
+  /// [showHidden] 为 true 时含点开头目录。失败返回 null。
+  Future<Map<String, dynamic>?> workspaceList(String dir, {bool showHidden = false}) async {
+    try {
+      final q = Uri(
+        path: '/mobile-bridge/workspace-list',
+        queryParameters: {'path': dir, if (showHidden) 'hidden': '1'},
+      ).toString();
+      final resp = await transport.request('GET', q);
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 一元 RPC，返回原始 result.value（数组等非对象形状的端点用这个）。
   Future<dynamic> rpcValue(String endpoint, Map<String, dynamic> args) async {
     final body = jsonEncode({

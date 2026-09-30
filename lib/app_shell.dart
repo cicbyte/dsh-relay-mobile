@@ -7,6 +7,7 @@ import 'dsh/transport.dart';
 import 'pages/session_page.dart';
 import 'pages/settings_page.dart';
 import 'theme.dart';
+import 'widgets/workspace_picker.dart';
 
 /// 应用根：持有连接状态（transport/client）与会话列表，供抽屉与主内容共享。
 class AppRoot extends StatefulWidget {
@@ -171,7 +172,11 @@ class _AppRootState extends State<AppRoot> {
       return;
     }
     try {
-      final id = await client.sessionCreate();
+      rootScaffoldKey.currentState?.closeDrawer();
+      // 先选工作区（null=取消；''=用默认；否则=选定路径）
+      final cwd = await WorkspacePicker.show(context, client);
+      if (cwd == null) return; // 取消
+      final id = await client.sessionCreate(cwd: cwd.isEmpty ? null : cwd);
       final s = SessionSummary(sessionId: id, title: '', running: true, blank: true);
       selectSession(s);
       await refreshSessions();
