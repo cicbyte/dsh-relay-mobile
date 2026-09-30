@@ -118,8 +118,14 @@ class _TurnRailState extends State<TurnRail> {
             child: Listener(
               behavior: HitTestBehavior.translucent,
               onPointerDown: (_) => setState(() => _pointerInside = true),
-              onPointerUp: (_) => setState(() => _pointerInside = false),
-              onPointerCancel: (_) => setState(() => _pointerInside = false),
+              onPointerUp: (_) => setState(() {
+                _pointerInside = false;
+                _preview = null; // 保险：抬手必收预览卡
+              }),
+              onPointerCancel: (_) => setState(() {
+                _pointerInside = false;
+                _preview = null;
+              }),
               child: SizedBox(
                 height: band,
                 width: _railWidth,

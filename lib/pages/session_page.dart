@@ -2097,9 +2097,20 @@ class _SessionPageState extends State<SessionPage> {
             }
           },
         ),
-        title: Text(
-          '${isSubagent ? '子agent · ' : ''}${_displayTitle(records)}',
-          overflow: TextOverflow.ellipsis,
+        // 定尺寸外壳：裸 Text 在此 AppBar 的 middle 槽不绘制（真机实证），
+        // 用 SizedBox 撑出确定盒后正常上画；同时保证标题不被 actions 挤没。
+        title: SizedBox(
+          width: 240,
+          height: 40,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '${isSubagent ? '子agent · ' : ''}${_displayTitle(records)}',
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
         ),
         actions: [
           // 计划模式指示 + 开关（对齐 web dsh-client-ui-plan）：
