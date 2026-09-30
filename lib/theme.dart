@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:ui' show lerpDouble;
 
 /// 皮肤（换皮不换布局）：
 ///   A 深空玻璃 Dark Glass —— 深空蓝渐变底 + 玻璃卡 + 蓝→青辉光
@@ -117,7 +118,26 @@ class SkinTokens extends ThemeExtension<SkinTokens> {
   }
 
   @override
-  SkinTokens lerp(ThemeExtension<SkinTokens>? other, double t) => this;
+  SkinTokens lerp(ThemeExtension<SkinTokens>? other, double t) {
+    if (other is! SkinTokens) return this;
+    if (t == 0) return this;
+    if (t == 1) return other;
+    return SkinTokens(
+      name: t < 0.5 ? name : other.name,
+      appbarGradient: Gradient.lerp(appbarGradient, other.appbarGradient, t),
+      drawerGradient: Gradient.lerp(drawerGradient, other.drawerGradient, t),
+      composerFill: Color.lerp(composerFill, other.composerFill, t)!,
+      composerBorder:
+          Color.lerp(composerBorder, other.composerBorder, t),
+      composerRadius:
+          lerpDouble(composerRadius, other.composerRadius, t)!,
+      fieldRadius: lerpDouble(fieldRadius, other.fieldRadius, t)!,
+      cardRadius: lerpDouble(cardRadius, other.cardRadius, t)!,
+      userBubbleGradient:
+          Gradient.lerp(userBubbleGradient, other.userBubbleGradient, t),
+      glowColor: Color.lerp(glowColor, other.glowColor, t),
+    );
+  }
 }
 
 class DshTheme {

@@ -62,10 +62,15 @@ class AppearancePage extends StatelessWidget {
                               color: theme.colorScheme.onSurfaceVariant)),
                     ]),
               ),
-              if (selected) ...[
-                const SizedBox(width: 10),
-                Icon(Icons.check_circle, color: accent, size: 22),
-              ],
+              // 勾选槽位常驻：选中切换不改变行宽，杜绝点击触发布局跳动
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: selected
+                    ? Icon(Icons.check_circle, color: accent, size: 22)
+                    : null,
+              ),
             ]),
           ),
         );

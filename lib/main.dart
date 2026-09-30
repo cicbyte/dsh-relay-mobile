@@ -22,10 +22,18 @@ class DshMobileApp extends StatelessWidget {
     return ValueListenableBuilder<DshSkin>(
       valueListenable: skinNotifier,
       builder: (context, skin, _) {
+        final theme = DshTheme.of(skin);
         return MaterialApp(
           title: 'DSH Mobile',
           debugShowCheckedModeBanner: false,
-          theme: DshTheme.of(skin),
+          theme: theme,
+          // 换肤走颜色补间（ThemeData + SkinTokens 全量 lerp）：~240ms 平滑过渡，杜绝闪屏。
+          builder: (context, child) => AnimatedTheme(
+            data: theme,
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutCubic,
+            child: child ?? const SizedBox.shrink(),
+          ),
           home: const AppRoot(),
         );
       },
