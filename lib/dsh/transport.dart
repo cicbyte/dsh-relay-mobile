@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 /// 传输层抽象：上层（DshClient / DshMux）只认 request + openSocket，
 /// 直连局域网（DirectTransport）与云端转发（RelayTransport）可互换。
@@ -22,7 +23,9 @@ class TransportResponse {
   final int status;
   final String body;
   final List<String> setCookie;
-  TransportResponse({required this.status, required this.body, this.setCookie = const []});
+  // 二进制响应体（下载附件等）；文本响应时为 null。隧道帧 body 走 base64 解码填充。
+  final List<int>? bytes;
+  TransportResponse({required this.status, required this.body, this.setCookie = const [], this.bytes});
 }
 
 abstract class TransportSocket {
@@ -64,11 +67,16 @@ class DirectTransport extends DshTransport {
       // （_UnicodeSubsetEncoder）。JSON 本就是 UTF-8，按字节直写最稳。
       if (body != null) req.add(utf8.encode(body));
       final resp = await req.close();
-      final text = await resp.transform(utf8.decoder).join();
+      // 先收原始字节：文本/二进制统一处理，二进制（octet-stream）填 bytes
+      final raw = await resp.fold<BytesBuilder>(BytesBuilder(), (b, chunk) => b..add(chunk));
+      final data = raw.takeBytes();
+      final ct = resp.headers.contentType?.mimeType ?? '';
+      final isBinary = ct == 'application/octet-stream' || ct.startsWith('image/') || ct.startsWith('audio/') || ct.startsWith('video/') || ct == 'application/pdf' || ct == 'application/zip';
       return TransportResponse(
         status: resp.statusCode,
-        body: text,
+        body: isBinary ? '' : utf8.decode(data, allowMalformed: true),
         setCookie: resp.headers[HttpHeaders.setCookieHeader] ?? const [],
+        bytes: isBinary ? data : null,
       );
     } catch (e) {
       throw TransportException('direct/http-failed', '$e');
@@ -485,7 +493,13 @@ class RelayTransport extends DshTransport {
       throw TransportException('${frame['code'] ?? 'relay/error'}', '${frame['message'] ?? ''}');
     }
     final setCookie = (frame['setCookie'] as List? ?? []).whereType<String>().toList();
-    return TransportResponse(status: (frame['status'] as num? ?? 0).toInt(), body: '${frame['body'] ?? ''}', setCookie: setCookie);
+    final isBinary = frame['binary'] == true;
+    return TransportResponse(
+      status: (frame['status'] as num? ?? 0).toInt(),
+      body: isBinary ? '' : '${frame['body'] ?? ''}',
+      setCookie: setCookie,
+      bytes: isBinary ? base64.decode('${frame['body'] ?? ''}') : null,
+    );
   }
 
   @override

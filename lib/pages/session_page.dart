@@ -12,6 +12,7 @@ import '../dsh/dsh_client.dart';
 import '../dsh/interactions.dart';
 import '../theme.dart';
 import '../widgets/interaction_composer.dart';
+import '../widgets/download_flow.dart';
 import '../widgets/markdown_text.dart';
 import '../widgets/turn_rail.dart';
 import 'trajectory_page.dart';
@@ -25,12 +26,16 @@ class SessionPage extends StatefulWidget {
   /// 发消息等会话活动后回调（AppRoot 刷新侧边栏列表）。
   final VoidCallback? onSessionEnded;
 
+  /// 当前配对设备 id（附件下载链接绑定用）。
+  final String deviceId;
+
   const SessionPage({
     super.key,
     required this.client,
     required this.summary,
     required this.onOpenDrawer,
     this.onSessionEnded,
+    this.deviceId = '',
   });
 
   @override
@@ -947,6 +952,16 @@ class _SessionPageState extends State<SessionPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _startDownload() async {
+    if (widget.deviceId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('未配对设备，无法生成绑定下载链接')),
+      );
+      return;
+    }
+    await DownloadFlow.start(context, widget.client, widget.deviceId);
   }
 
   /// 选附件：图片留 base64 直传；其他文件即刻上传拿 receiptId。
@@ -2325,6 +2340,11 @@ class _SessionPageState extends State<SessionPage> {
                                   icon: Icons.add_circle_outline,
                                   tooltip: '附件',
                                   onPressed: _sending ? null : _pickFiles,
+                                ),
+                                _composerIcon(
+                                  icon: Icons.download_outlined,
+                                  tooltip: '下载附件',
+                                  onPressed: _startDownload,
                                 ),
                                 _composerIcon(
                                   icon: Icons.alternate_email,

@@ -99,11 +99,15 @@ class DshClient {
 
   /// 列子目录（环回限定，经隧道）：{ ok, path, parent, dirs: [{path,label}] }。
   /// [showHidden] 为 true 时含点开头目录。失败返回 null。
-  Future<Map<String, dynamic>?> workspaceList(String dir, {bool showHidden = false}) async {
+  Future<Map<String, dynamic>?> workspaceList(String dir, {bool showHidden = false, bool withFiles = false}) async {
     try {
       final q = Uri(
         path: '/mobile-bridge/workspace-list',
-        queryParameters: {'path': dir, if (showHidden) 'hidden': '1'},
+        queryParameters: {
+          'path': dir,
+          if (showHidden) 'hidden': '1',
+          if (withFiles) 'files': '1',
+        },
       ).toString();
       final resp = await transport.request('GET', q);
       if (resp.status != 200 || resp.body.isEmpty) return null;
@@ -114,6 +118,78 @@ class DshClient {
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// 创建附件下载链接（设备绑定、默认 30min、上限 7 天）：{ downloadId, expiresAt, ttl }。
+  /// [deviceId] 经 x-device-id 头绑定（方案 A，不进链接明文）。失败返回 null。
+  Future<Map<String, dynamic>?> dlCreate(String filePath, {int? expiresInSec, required String deviceId}) async {
+    try {
+      final resp = await transport.request(
+        'POST',
+        '/mobile-bridge/dl-create',
+        headers: {'content-type': 'application/json; charset=utf-8', 'x-device-id': deviceId},
+        body: jsonEncode({
+          'path': filePath,
+          if (expiresInSec != null) 'expiresInSec': expiresInSec,
+          'deviceId': deviceId,
+        }),
+      );
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 下载文件字节（设备绑定，app 内拉取）。返回文件字节，失败返回 null。
+  Future<List<int>?> dlFetch(String downloadId, String deviceId) async {
+    try {
+      final q = Uri(
+        path: '/mobile-bridge/dl/$downloadId',
+        queryParameters: {'d': deviceId},
+      ).toString();
+      final resp = await transport.request('GET', q, headers: {'x-device-id': deviceId});
+      if (resp.status != 200) return null;
+      return resp.bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 列出有效下载链接（管理页）：{ items: [...] }。
+  Future<Map<String, dynamic>?> dlList() async {
+    try {
+      final resp = await transport.request('GET', '/mobile-bridge/dl-list');
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 撤销下载链接。成功返回 true。
+  Future<bool> dlRevoke(String downloadId) async {
+    try {
+      final resp = await transport.request(
+        'POST',
+        '/mobile-bridge/dl-revoke',
+        headers: {'content-type': 'application/json; charset=utf-8'},
+        body: jsonEncode({'downloadId': downloadId}),
+      );
+      if (resp.status != 200 || resp.body.isEmpty) return false;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      return j['code'] == 200;
+    } catch (_) {
+      return false;
     }
   }
 

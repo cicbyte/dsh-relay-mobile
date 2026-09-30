@@ -24,6 +24,12 @@ class _AppRootState extends State<AppRoot> {
   DshTransport? _transport;
   DshClient? _client;
   String _modeLabel = '未连接';
+
+  /// 当前配对设备 id（附件下载链接绑定用）；直连模式为空。
+  String get _activeDeviceId {
+    final t = _transport;
+    return t is RelayTransport ? t.deviceId : '';
+  }
   List<SessionSummary> _sessions = [];
   SessionSummary? _selected;
   bool _sessionsLoading = false;
@@ -231,6 +237,7 @@ class _AppRootState extends State<AppRoot> {
                       key: ValueKey(_selected!.sessionId),
                       client: client,
                       summary: _selected!,
+                      deviceId: _activeDeviceId,
                       onOpenDrawer: () => rootScaffoldKey.currentState?.openDrawer(),
                       onSessionEnded: refreshSessions,
                     ),

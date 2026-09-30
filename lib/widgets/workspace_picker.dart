@@ -12,16 +12,19 @@ class WorkspacePicker extends StatefulWidget {
   final DshClient client;
   final WorkspacePicked onPicked;
   final String? initialPath;
+  // dir=选目录（默认）；file=选文件（列文件、点文件即选中，用于附件下载）
+  final bool pickFile;
 
   const WorkspacePicker({
     super.key,
     required this.client,
     required this.onPicked,
     this.initialPath,
+    this.pickFile = false,
   });
 
   /// 弹出选择器，返回选中路径（null=取消/用默认）。
-  static Future<String?> show(BuildContext context, DshClient client, {String? initialPath}) {
+  static Future<String?> show(BuildContext context, DshClient client, {String? initialPath, bool pickFile = false}) {
     return showModalBottomSheet<String?>(
       context: context,
       isScrollControlled: true,
@@ -34,6 +37,7 @@ class WorkspacePicker extends StatefulWidget {
         builder: (ctx, scrollCtrl) => WorkspacePicker(
           client: client,
           initialPath: initialPath,
+          pickFile: pickFile,
           onPicked: (p) => Navigator.of(ctx).pop(p),
         ),
       ),
@@ -47,6 +51,7 @@ class WorkspacePicker extends StatefulWidget {
 class _WorkspacePickerState extends State<WorkspacePicker> {
   // 浏览栈：空 = 根层（列盘符/根）；否则 = 当前目录的子目录列表。
   List<Map<String, dynamic>> _dirs = [];
+  List<Map<String, dynamic>> _files = [];
   List<Map<String, dynamic>> _quick = [];
   List<Map<String, dynamic>> _roots = [];
   String? _current; // 当前浏览目录（null=根层）
@@ -90,7 +95,7 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
       _loading = true;
       _error = null;
     });
-    final r = await widget.client.workspaceList(dir, showHidden: _showHidden);
+    final r = await widget.client.workspaceList(dir, showHidden: _showHidden, withFiles: widget.pickFile);
     if (!mounted) return;
     if (r == null || r['ok'] != true) {
       setState(() {
@@ -102,6 +107,7 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
     setState(() {
       _current = '${r['path']}';
       _dirs = List<Map<String, dynamic>>.from(r['dirs'] ?? []);
+      _files = List<Map<String, dynamic>>.from(r['files'] ?? []);
       _loading = false;
     });
   }
@@ -241,16 +247,22 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
         items.add(_dirTile('${r['path']}', '${r['label']}', Icons.computer_outlined));
       }
     } else {
-      // 子目录层
-      items.add(ListTile(
-        leading: const Icon(Icons.folder_open),
-        title: const Text('（选择当前目录）'),
-        onTap: () => _pick(_current!),
-      ));
+      // 子目录层：目录可下钻；file 模式下文件可选中（点选 = 下载目标）
+      if (!widget.pickFile) {
+        items.add(ListTile(
+          leading: const Icon(Icons.folder_open),
+          title: const Text('（选择当前目录）'),
+          onTap: () => _pick(_current!),
+        ));
+      }
       for (final d in _dirs) {
         items.add(_dirTile('${d['path']}', '${d['label']}', Icons.folder_outlined));
       }
-      if (_dirs.isEmpty) {
+      // file 模式：列文件，点选即选中
+      for (final f in _files) {
+        items.add(_fileTile('${f['path']}', '${f['label']}', f['size'] ?? 0));
+      }
+      if (_dirs.isEmpty && (_files.isEmpty || !widget.pickFile)) {
         items.add(const Padding(
           padding: EdgeInsets.all(24),
           child: Text('（空目录，可选当前目录或返回上层）', textAlign: TextAlign.center),
@@ -265,6 +277,26 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
         child: Text(title, style: theme.textTheme.labelLarge),
       );
+
+  Widget _fileTile(String path, String label, dynamic size) {
+    final selected = _selected == path;
+    return ListTile(
+      leading: Icon(Icons.insert_drive_file_outlined, color: Theme.of(context).colorScheme.primary),
+      title: Text(label),
+      subtitle: Text(_fmtSize(size), maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: selected ? const Icon(Icons.check) : const Icon(Icons.download_outlined),
+      selected: selected,
+      onTap: () => _pick(path), // 文件点选即选中（下载目标）
+    );
+  }
+
+  String _fmtSize(dynamic size) {
+    final n = size is num ? size.toInt() : 0;
+    if (n < 1024) return '$n B';
+    if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
+    if (n < 1024 * 1024 * 1024) return '${(n / 1024 / 1024).toStringAsFixed(1)} MB';
+    return '${(n / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
 
   Widget _dirTile(String path, String label, IconData icon, {bool quick = false}) {
     final selected = _selected == path;
