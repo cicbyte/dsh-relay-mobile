@@ -107,7 +107,11 @@ class _ConnectPageState extends State<ConnectPage> {
       }
 
       final client = DshClient(transport);
-      final launch = _launchCtrl.text.trim();
+      var launch = _launchCtrl.text.trim();
+      if (launch.isEmpty) {
+        // 零手工令牌：配对成功后经隧道向桥自动取本机 launch token（失败静默回退手动）
+        launch = await client.fetchLaunchToken();
+      }
       if (launch.isNotEmpty) await client.authorize(launch);
       await client.sessionList(); // 连通性自检
 

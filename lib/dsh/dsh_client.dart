@@ -65,6 +65,22 @@ class DshClient {
     return Map<String, dynamic>.from(v is Map ? v : const {});
   }
 
+  /// 零手工令牌：经隧道向桥要本机 dsh launch token（手机通道插件的环回限定路由）。
+  /// 插件旧版本/路由不可用时返回 ''，调用方回退手动输入。
+  Future<String> fetchLaunchToken() async {
+    try {
+      final resp = await transport.request('GET', '/mobile-bridge/launch-token');
+      if (resp.status != 200 || resp.body.isEmpty) return '';
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return '${j['result']['token'] ?? ''}';
+      }
+      return '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// 一元 RPC，返回原始 result.value（数组等非对象形状的端点用这个）。
   Future<dynamic> rpcValue(String endpoint, Map<String, dynamic> args) async {
     final body = jsonEncode({
@@ -79,6 +95,10 @@ class DshClient {
       headers: {'content-type': 'application/json; charset=utf-8', ..._authHeaders},
       body: body,
     );
+    if (resp.status == 401) {
+      // 401 体是纯文本 unauthorized——先于 JSON 解码判出，给可行动的提示
+      throw DshRpcException('auth/required', '未授权：请填 launch token（dsh 行配置页「扫码接入」的安全码）后重连');
+    }
     if (resp.body.isEmpty) {
       throw DshRpcException('http/${resp.status}', '空响应（多半是 cookie 失效或 Host 未被信任）');
     }
