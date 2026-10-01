@@ -277,6 +277,11 @@ class RelayTransport extends DshTransport {
       (data) {
         // 旧 socket 迟到的帧不得进入当前传输（同设备顶替的 bye 竞态，见 _handleDisconnect）
         if (!identical(_ws, ws)) return;
+        // 二进制载荷帧（下载块零膨胀）：[seq:8 BE][rid_len:1][rid][payload]
+        if (data is Uint8List) {
+          _handleBinaryFrame(data);
+          return;
+        }
         if (data is! String) return;
         Map<String, dynamic> frame;
         try {
@@ -357,6 +362,21 @@ class RelayTransport extends DshTransport {
     await connect();
   }
 
+  /// 二进制载荷帧：[seq:8 BE][rid_len:1][rid][payload] → 解出 rid/payload 喂 _streams（下载块零膨胀）。
+  void _handleBinaryFrame(Uint8List data) {
+    if (data.length < 9) return;
+    final ridLen = data[8];
+    if (data.length < 9 + ridLen) return;
+    final rid = utf8.decode(data.sublist(9, 9 + ridLen), allowMalformed: true);
+    final payload = data.sublist(9 + ridLen);
+    final sc = _streams[rid];
+    if (sc != null && !sc.isClosed) {
+      sc.add(payload);
+      // 背压 ack：确认收到块 → 桥滑动窗口推进
+      _ws?.add(jsonEncode({'type': 'dl-ack', 'rid': rid}));
+    }
+  }
+
   void _dispatch(Map<String, dynamic> frame) {
     // v3：推进续传断点（隧道帧带 seq；batch 内层递归同样计数）
     final seq = frame['seq'];
@@ -394,21 +414,17 @@ class RelayTransport extends DshTransport {
         final rid = '${frame['rid']}';
         // 流式分块（下载大文件）：chunk 帧喂 StreamController，last 帧收尾（含 status）
         final sc = _streams[rid];
-        if (sc != null && frame['type'] == 'http-res' && frame['chunk'] != null) {
-          // 首块带 contentLength → 进度 total
-          final cl = frame['contentLength'];
-          if (cl is num) {
-            final meta = _streamMeta.remove(rid);
-            if (cl.toInt() > 0) meta?.call(cl.toInt());
+        if (sc != null && frame['type'] == 'http-res') {
+          // 元数据帧：meta.contentLength → 进度 total（载荷走二进制帧 _handleBinaryFrame）
+          final meta = frame['meta'];
+          if (meta is Map && meta['contentLength'] is num) {
+            final cl = (meta['contentLength'] as num).toInt();
+            if (cl > 0) _streamMeta.remove(rid)?.call(cl);
           }
-          try {
-            sc.add(base64.decode('${frame['chunk']}'));
-          } catch (_) {}
-          // 背压 ack：确认收到块 → 桥滑动窗口推进
-          _ws?.add(jsonEncode({'type': 'dl-ack', 'rid': rid}));
+          // last 帧：收尾
           if (frame['last'] == true) {
             _streams.remove(rid);
-            sc.close();
+            if (!sc.isClosed) sc.close();
           }
           return;
         }
