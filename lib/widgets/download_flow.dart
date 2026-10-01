@@ -133,10 +133,13 @@ class _DownloadSheetState extends State<_DownloadSheet> {
       // 落盘 app 私有目录（应用文档目录）
       final dir = await getApplicationDocumentsDirectory();
       final dest = File('${dir.path}/${widget.fileName}');
+      // 隧道流式（分块）优先；直连不可用时回退 HttpClient
+      final stream = widget.client.dlStream(widget.downloadId, widget.deviceId);
       final ok = await DownloadClient(widget.client.downloadBase).fetchToFile(
         widget.downloadId,
         widget.deviceId,
         dest,
+        streamSource: stream,
         onProgress: (received, total) {
           if (!mounted) return;
           setState(() => _progress = total > 0 ? received / total : null);

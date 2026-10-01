@@ -16,12 +16,38 @@ class DownloadClient {
 
   /// 流式下载到 [destFile]。支持断点续传（文件已存在则 Range 从断点续）。
   /// [onProgress](received, total)：total 未知时为 -1。返回是否完整下载。
+  /// [streamSource]：隧道流式字节流（RelayTransport.streamRequest）；为空则走直连 HttpClient。
   Future<bool> fetchToFile(
     String downloadId,
     String deviceId,
     File destFile, {
     void Function(int received, int total)? onProgress,
+    Stream<List<int>>? streamSource,
   }) async {
+    // 隧道流式：逐块写盘，断点续传靠本地已有 offset（隧道暂不支持 Range，追加写）
+    if (streamSource != null) {
+      IOSink? sink;
+      try {
+        int offset = destFile.existsSync() ? destFile.lengthSync() : 0;
+        sink = destFile.openWrite(mode: FileMode.append);
+        int received = offset;
+        await for (final chunk in streamSource) {
+          sink.add(chunk);
+          received += chunk.length;
+          onProgress?.call(received, -1);
+        }
+        await sink.flush();
+        return true;
+      } catch (_) {
+        return false;
+      } finally {
+        try {
+          await sink?.close();
+        } catch (_) {}
+      }
+    }
+
+    // 直连 HttpClient：Range 断点续传
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
     IOSink? sink;
     try {

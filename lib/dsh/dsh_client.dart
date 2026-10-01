@@ -164,6 +164,19 @@ class DshClient {
     }
   }
 
+  /// 隧道流式下载字节流（大文件经分块）。仅隧道传输有效；直连返回 null（走 DownloadClient HttpClient）。
+  Stream<List<int>>? dlStream(String downloadId, String deviceId) {
+    final q = Uri(
+      path: '/mobile-bridge/dl/$downloadId',
+      queryParameters: {'d': deviceId},
+    ).toString();
+    try {
+      return (transport as dynamic).streamRequest('GET', q, headers: {'x-device-id': deviceId}) as Stream<List<int>>;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 列出有效下载链接（管理页）：{ items: [...] }。
   Future<Map<String, dynamic>?> dlList() async {
     try {

@@ -210,6 +210,8 @@ class RelayTransport extends DshTransport {
 
   WebSocket? _ws;
   final Map<String, Completer<Map<String, dynamic>>> _pending = {};
+  // 流式下载（大文件分块）：rid -> 字节 StreamController，http-res chunk 帧逐块喂
+  final Map<String, StreamController<List<int>>> _streams = {};
   final Map<String, StreamController<String>> _sockets = {};
   final StreamController<Map<String, dynamic>> _events = StreamController.broadcast();
   bool _closed = false;
@@ -388,6 +390,23 @@ class RelayTransport extends DshTransport {
       case 'http-res':
       case 'error':
         final rid = '${frame['rid']}';
+        // 流式分块（下载大文件）：chunk 帧喂 StreamController，last 帧收尾（含 status）
+        final sc = _streams[rid];
+        if (sc != null && frame['type'] == 'http-res' && frame['chunk'] != null) {
+          try {
+            sc.add(base64.decode('${frame['chunk']}'));
+          } catch (_) {}
+          if (frame['last'] == true) {
+            _streams.remove(rid);
+            sc.close();
+          }
+          return;
+        }
+        if (sc != null && frame['type'] == 'http-res' && frame['last'] == true) {
+          _streams.remove(rid);
+          sc.close();
+          return;
+        }
         final c = _pending.remove(rid);
         c?.complete(frame);
         return;
@@ -510,6 +529,30 @@ class RelayTransport extends DshTransport {
       setCookie: setCookie,
       bytes: isBinary ? base64.decode('${frame['body'] ?? ''}') : null,
     );
+  }
+
+  /// 流式下载（大文件经隧道分块）：发 stream:true 的 http-req，返回字节流。
+  /// 桥逐块回 http-res chunk 帧，这里喂 StreamController。下载大 APK 不进内存。
+  Stream<List<int>> streamRequest(
+    String method,
+    String path, {
+    Map<String, String> headers = const {},
+  }) async* {
+    await _ensureConnected();
+    final ws = _ws;
+    if (ws == null) throw TransportException('relay/not-connected', '中继未连接');
+    final rid = '${DateTime.now().microsecondsSinceEpoch}-${_streams.length}';
+    final controller = StreamController<List<int>>();
+    _streams[rid] = controller;
+    ws.add(jsonEncode({
+      'type': 'http-req',
+      'rid': rid,
+      'method': method,
+      'path': path,
+      'headers': headers,
+      'stream': true,
+    }));
+    yield* controller.stream;
   }
 
   @override
