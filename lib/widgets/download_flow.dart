@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../device_info.dart';
 import '../dsh/download_client.dart';
 import '../dsh/dsh_client.dart';
 import 'workspace_picker.dart';
@@ -363,12 +364,17 @@ class _DownloadSheetState extends State<_DownloadSheet> {
   bool _downloading = false;
   double? _progress; // 0..1；total 未知时为 null
   String? _done;
+  bool _downloadOk = false; // 下载成功后才给「保存到系统下载」入口
+  bool _savingDl = false;
+  String? _savedTo;
 
   Future<void> _download() async {
     setState(() {
       _downloading = true;
       _progress = null;
       _done = null;
+      _downloadOk = false;
+      _savedTo = null;
     });
     try {
       // 落盘 app 私有目录（应用文档目录）
@@ -394,6 +400,7 @@ class _DownloadSheetState extends State<_DownloadSheet> {
       if (!mounted) return;
       setState(() {
         _downloading = false;
+        _downloadOk = ok;
         _done = ok ? '已保存到 ${dest.path}' : '下载失败';
       });
     } catch (e) {
@@ -401,6 +408,34 @@ class _DownloadSheetState extends State<_DownloadSheet> {
       setState(() {
         _downloading = false;
         _done = '下载失败：$e';
+      });
+    }
+  }
+
+  /// 把 app 私有目录里的成品复制到系统「下载」（MediaStore，免权限），
+  /// 否则 Android 10+ 用户摸不到 app 私有文件。
+  Future<void> _saveToDownloads() async {
+    if (_savingDl) return;
+    if (!Platform.isAndroid) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('仅 Android 支持保存到系统下载')));
+      return;
+    }
+    setState(() => _savingDl = true);
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final loc =
+          await saveFileToDownloads('${dir.path}/${widget.fileName}', widget.fileName);
+      if (!mounted) return;
+      setState(() {
+        _savingDl = false;
+        _savedTo = loc.isEmpty ? '已保存到系统下载' : '已保存到系统下载：$loc';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _savingDl = false;
+        _savedTo = '保存到系统下载失败：$e';
       });
     }
   }
@@ -434,6 +469,26 @@ class _DownloadSheetState extends State<_DownloadSheet> {
               if (_done != null) ...[
                 const SizedBox(height: 8),
                 Text(_done!, style: theme.textTheme.bodySmall),
+              ],
+              if (_downloadOk) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _savingDl ? null : _saveToDownloads,
+                    icon: _savingDl
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.save_alt),
+                    label: Text(_savingDl ? '保存中…' : '保存到系统下载'),
+                  ),
+                ),
+              ],
+              if (_savedTo != null) ...[
+                const SizedBox(height: 8),
+                Text(_savedTo!, style: theme.textTheme.bodySmall),
               ],
               const SizedBox(height: 20),
               Row(

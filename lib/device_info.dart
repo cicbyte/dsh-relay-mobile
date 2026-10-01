@@ -19,3 +19,14 @@ Future<String?> deviceTimeZoneId() async {
     return null;
   }
 }
+
+/// 把 app 私有目录里的已下载文件保存到系统「下载」目录（平台通道，仅 Android）。
+/// Android 10+ 走 MediaStore 免权限；更早回退公共 Downloads（无权限会抛错）。
+/// 返回保存位置描述；失败抛 PlatformException（调用方提示）。
+Future<String> saveFileToDownloads(String path, String name) async {
+  final loc = await _deviceChannel.invokeMethod<String>('saveToDownloads', {
+    'path': path,
+    'name': name,
+  });
+  return loc ?? '';
+}
