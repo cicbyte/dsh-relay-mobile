@@ -236,7 +236,7 @@ class RelayTransport extends DshTransport {
 
   /// 闪断自动重连（隧道跨断线存活的前提）：单飞 + 指数退避
   Timer? _reconnectTimer;
-  int _backoffMs = 1000;
+  int _backoffMs = 500;
 
   /// 配对成功后本实例持有的设备身份（供上层落盘后下次重连复用）
   String? pairedDeviceId;
@@ -465,25 +465,28 @@ class RelayTransport extends DshTransport {
     _scheduleReconnect();
   }
 
-  /// 闪断自动重连（单飞）：指数退避；限流冷却按服务端提示顺延
+  /// 闪断自动重连（单飞）：快速恢复优先——断后首次快连（500ms 起，弱网友好），
+  /// 失败才指数退避 + 抖动（防同步重连风暴）；限流冷却按服务端提示顺延。
   void _scheduleReconnect() {
     if (_closed || _authFailed || _reconnectTimer != null) return;
-    _reconnectTimer = Timer(Duration(milliseconds: _backoffMs), () async {
+    final jitter = (_backoffMs * 0.3 * ((DateTime.now().millisecondsSinceEpoch % 100) / 100)).round();
+    _reconnectTimer = Timer(Duration(milliseconds: _backoffMs + jitter), () async {
       _reconnectTimer = null;
       if (_closed || _authFailed) return;
       try {
         await connect();
+        _backoffMs = 500; // 连上即复位到快速档（弱网频繁断连时快速回连）
       } on TransportException catch (e) {
         if (e.code == 'relay/rate-limited') {
           final nb = _retryNotBefore;
           final waitMs = nb == null ? _backoffMs : nb.difference(DateTime.now()).inMilliseconds + 200;
-          _backoffMs = waitMs.clamp(1000, 60000);
+          _backoffMs = waitMs.clamp(500, 60000);
         } else {
-          _backoffMs = (_backoffMs * 2).clamp(1000, 30000);
+          _backoffMs = (_backoffMs * 2).clamp(500, 30000);
         }
         _scheduleReconnect();
       } catch (_) {
-        _backoffMs = (_backoffMs * 2).clamp(1000, 30000);
+        _backoffMs = (_backoffMs * 2).clamp(500, 30000);
         _scheduleReconnect();
       }
     });
@@ -524,6 +527,36 @@ class RelayTransport extends DshTransport {
 
   @override
   Future<TransportResponse> request(
+    String method,
+    String path, {
+    Map<String, String> headers = const {},
+    String? body,
+  }) async {
+    // 断连韧性：断连导致的失败自动重试一次（弱网闪断不报错），其余错误照常抛
+    try {
+      return await _doRequest(method, path, headers: headers, body: body);
+    } on TransportException catch (e) {
+      if (e.code == 'relay/disconnected' || e.code == 'relay/not-connected') {
+        // 等待重连后重发一次（请求排队等连，而非失败）
+        await _waitConnected();
+        return await _doRequest(method, path, headers: headers, body: body);
+      }
+      rethrow;
+    }
+  }
+
+  /// 等待连接就绪（限 10s），供断连重试用。
+  Future<void> _waitConnected() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (_ws == null && !_closed && DateTime.now().isBefore(deadline)) {
+      await _ensureConnected().catchError((_) {});
+      if (_ws != null) return;
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+    if (_ws == null) throw TransportException('relay/not-connected', '中继未连接');
+  }
+
+  Future<TransportResponse> _doRequest(
     String method,
     String path, {
     Map<String, String> headers = const {},
