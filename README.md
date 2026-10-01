@@ -21,6 +21,11 @@ DSH 的 Flutter 移动端客户端（Android 优先），通过 DSH 服务端协
 - subagent 会话支持：`SessionAddress = {kind:'subagent', parentSessionId, childSessionId, mode}`
   （mode 在 one-shot / continuable 间自动兜底）；「子agent」面板走 `subagents/list` 目录
   进入子会话，continuable 子代理可发消息（`subagents/prompt`）/中断（`subagents/interruptByParent`）
+- **附件下载（下载池模型）**：手机只能下载「下载池」内文件——工作区池
+  `<会话cwd>/.dsh-download` + 全局池 `$DSH_HOME/.dsh-download`（无 cwd 会话只有全局池）；
+  「＋」从磁盘选文件**复制入池**（原文件保留，同名自动加后缀），池内点选生成
+  设备绑定链接（默认 30min/上限 7 天）→ 流式下载或复制路径；池内副本可删。
+  安全边界在桥端：`dl-create` 对池外路径一律 403，绕过手机 UI 也下不了任意磁盘文件
 - **对齐 web 版功能点**：「深度求索中…」运行态指示（秒级计时）；「轨迹」视图
   （全部事件按轮分组时间线 + 搜索 + JSON 展开，含 step/ 审计事件）
 - 连接层：`lib/dsh/transport.dart`（直连/转发两种传输可插拔）+ `lib/dsh/dsh_client.dart`

@@ -126,7 +126,9 @@ class DshClient {
 
   /// 创建附件下载链接（设备绑定、默认 30min、上限 7 天）：{ downloadId, expiresAt, ttl }。
   /// [deviceId] 经 x-device-id 头绑定（方案 A，不进链接明文）。失败返回 null。
-  Future<Map<String, dynamic>?> dlCreate(String filePath, {int? expiresInSec, required String deviceId}) async {
+  /// [workspaceRoot] 为当前会话 cwd——桥端只放行「工作区池 + 全局池」内文件。
+  Future<Map<String, dynamic>?> dlCreate(String filePath,
+      {int? expiresInSec, required String deviceId, String? workspaceRoot}) async {
     try {
       final resp = await transport.request(
         'POST',
@@ -136,6 +138,7 @@ class DshClient {
           'path': filePath,
           if (expiresInSec != null) 'expiresInSec': expiresInSec,
           'deviceId': deviceId,
+          if (workspaceRoot != null && workspaceRoot.isNotEmpty) 'workspaceRoot': workspaceRoot,
         }),
       );
       if (resp.status != 200 || resp.body.isEmpty) return null;
@@ -175,6 +178,78 @@ class DshClient {
       return (transport as dynamic).streamRequest('GET', q, headers: {'x-device-id': deviceId}, onMeta: onMeta) as Stream<List<int>>;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// 下载池列表：{ items: [{name,path,size,mtime,pool}], workspace, global }。
+  /// [workspaceRoot] 为当前会话 cwd（空则只有全局池）。插件旧版本返回 null。
+  Future<Map<String, dynamic>?> dlPool({String? workspaceRoot}) async {
+    try {
+      final q = Uri(
+        path: '/mobile-bridge/dl-pool',
+        queryParameters: {
+          if (workspaceRoot != null && workspaceRoot.isNotEmpty) 'workspace': workspaceRoot,
+        },
+      ).toString();
+      final resp = await transport.request('GET', q);
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 添加文件入下载池（复制，原文件保留）：返回 { name, path, size, mtime, pool }。
+  /// [toWorkspace] 为 true 时入工作区池（需 [workspaceRoot]），否则入全局池。失败返回 null。
+  Future<Map<String, dynamic>?> dlStage(String filePath,
+      {required String deviceId, String? workspaceRoot, required bool toWorkspace}) async {
+    try {
+      final resp = await transport.request(
+        'POST',
+        '/mobile-bridge/dl-stage',
+        headers: {'content-type': 'application/json; charset=utf-8', 'x-device-id': deviceId},
+        body: jsonEncode({
+          'path': filePath,
+          'deviceId': deviceId,
+          'target': toWorkspace ? 'workspace' : 'global',
+          if (workspaceRoot != null && workspaceRoot.isNotEmpty) 'workspaceRoot': workspaceRoot,
+        }),
+      );
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 删除下载池内文件。[fromWorkspace] 为 true 时删工作区池（需 [workspaceRoot]）。
+  Future<bool> dlPoolDelete(String name,
+      {required String deviceId, String? workspaceRoot, required bool fromWorkspace}) async {
+    try {
+      final resp = await transport.request(
+        'POST',
+        '/mobile-bridge/dl-pool-delete',
+        headers: {'content-type': 'application/json; charset=utf-8', 'x-device-id': deviceId},
+        body: jsonEncode({
+          'name': name,
+          'pool': fromWorkspace ? 'workspace' : 'global',
+          'deviceId': deviceId,
+          if (workspaceRoot != null && workspaceRoot.isNotEmpty) 'workspaceRoot': workspaceRoot,
+        }),
+      );
+      if (resp.status != 200 || resp.body.isEmpty) return false;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      return j['code'] == 200;
+    } catch (_) {
+      return false;
     }
   }
 

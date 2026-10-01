@@ -8,23 +8,38 @@ import '../dsh/download_client.dart';
 import '../dsh/dsh_client.dart';
 import 'workspace_picker.dart';
 
-/// 附件下载流程：选文件 → 选有效期 → 生成链接 → app 内下载 / 复制。
-/// 链接随机唯一 + 绑定设备（x-device-id）+ 默认 30min、上限 7 天。
+/// 附件下载流程（下载池模型）：手机只能下载「下载池」内文件——
+/// 工作区池 `<会话cwd>/.dsh-download` 与 全局池 `$DSH_HOME/.dsh-download`。
+/// 要下载磁盘上的文件需先「添加到下载池」（桥端复制入池，原文件保留）；
+/// 桥端 dl-create 强制校验池内路径，选任意磁盘文件直接下发不再可能。
 class DownloadFlow {
-  /// 入口：弹完整流程。[deviceId] 为当前配对设备（绑定用）。
-  static Future<void> start(BuildContext context, DshClient client, String deviceId) async {
-    // 1. 选文件
-    final file = await WorkspacePicker.show(context, client, pickFile: true);
-    if (file == null || file.isEmpty || !context.mounted) return;
-    // 2. 选有效期
-    final ttl = await _pickTtl(context);
-    if (ttl == null || !context.mounted) return;
-    // 3. 生成链接 + 下载
-    await _createAndDownload(context, client, file, deviceId, ttl);
+  /// 入口：弹下载池面板。[workspaceRoot] 为当前会话 cwd；空/无工作区会话只有全局池。
+  static Future<void> start(
+    BuildContext context,
+    DshClient client,
+    String deviceId, {
+    String? workspaceRoot,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.75,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (ctx, scrollCtrl) => PoolSheet(
+          client: client,
+          deviceId: deviceId,
+          workspaceRoot: (workspaceRoot == null || workspaceRoot.isEmpty) ? null : workspaceRoot,
+        ),
+      ),
+    );
   }
 
   /// 有效期选择（默认 30min，上限 7 天）。返回秒；null=取消。
-  static Future<int?> _pickTtl(BuildContext context) {
+  static Future<int?> pickTtl(BuildContext context) {
     const options = [
       ('30 分钟', 1800),
       ('1 小时', 3600),
@@ -65,36 +80,262 @@ class DownloadFlow {
       ),
     );
   }
+}
 
-  static Future<void> _createAndDownload(
-    BuildContext context,
-    DshClient client,
-    String file,
-    String deviceId,
-    int ttl,
-  ) async {
+/// 下载池面板：池列表（工作区 + 全局）+ 添加文件（磁盘任意文件复制入池）+ 删除。
+class PoolSheet extends StatefulWidget {
+  final DshClient client;
+  final String deviceId;
+  final String? workspaceRoot; // 当前会话 cwd；null = 仅全局池
+
+  const PoolSheet({
+    super.key,
+    required this.client,
+    required this.deviceId,
+    this.workspaceRoot,
+  });
+
+  @override
+  State<PoolSheet> createState() => _PoolSheetState();
+}
+
+class _PoolSheetState extends State<PoolSheet> {
+  Map<String, dynamic>? _pool;
+  bool _loading = true;
+  String? _error;
+  bool _staging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final r = await widget.client.dlPool(workspaceRoot: widget.workspaceRoot);
+    if (!mounted) return;
+    if (r == null) {
+      setState(() {
+        _loading = false;
+        _error = '无法获取下载池（插件旧版本或未连接）';
+      });
+      return;
+    }
+    setState(() {
+      _pool = r;
+      _loading = false;
+    });
+  }
+
+  /// 添加文件：全盘选文件 → 复制入池。有会话工作区入工作区池，否则入全局池。
+  Future<void> _addFile() async {
+    if (_staging) return;
+    final file = await WorkspacePicker.show(context, widget.client, pickFile: true);
+    if (file == null || file.isEmpty || !mounted) return;
+    setState(() => _staging = true);
+    final hasWs = widget.workspaceRoot != null;
+    final out = await widget.client.dlStage(
+      file,
+      deviceId: widget.deviceId,
+      workspaceRoot: widget.workspaceRoot,
+      toWorkspace: hasWs,
+    );
+    if (!mounted) return;
+    setState(() => _staging = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(out != null ? '已添加到下载池：${out['name']}' : '添加失败（复制未完成）'),
+    ));
+    if (out != null) await _load();
+  }
+
+  Future<void> _delete(Map<String, dynamic> f) async {
+    final name = '${f['name']}';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('从下载池删除'),
+        content: Text('删除池内副本「$name」？\n（仅删除 .dsh-download 里的副本，不影响原文件）'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final ok = await widget.client.dlPoolDelete(
+      name,
+      deviceId: widget.deviceId,
+      workspaceRoot: widget.workspaceRoot,
+      fromWorkspace: '${f['pool']}' == 'workspace',
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(ok ? '已删除 $name' : '删除失败')));
+    await _load();
+  }
+
+  /// 点选池内文件：选有效期 → 生成设备绑定链接 → 打开下载面板。
+  Future<void> _download(Map<String, dynamic> f) async {
+    final ttl = await DownloadFlow.pickTtl(context);
+    if (ttl == null || !context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(const SnackBar(content: Text('生成下载链接…')));
-    final out = await client.dlCreate(file, expiresInSec: ttl, deviceId: deviceId);
+    final out = await widget.client.dlCreate(
+      '${f['path']}',
+      expiresInSec: ttl,
+      deviceId: widget.deviceId,
+      workspaceRoot: widget.workspaceRoot,
+    );
     if (out == null) {
       messenger.showSnackBar(const SnackBar(content: Text('生成下载链接失败')));
       return;
     }
-    final downloadId = '${out['downloadId']}';
-    final name = file.split(RegExp(r'[\\/]')).last;
-
     if (!context.mounted) return;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) => _DownloadSheet(
-        client: client,
-        deviceId: deviceId,
-        downloadId: downloadId,
-        fileName: name,
+        client: widget.client,
+        deviceId: widget.deviceId,
+        downloadId: '${out['downloadId']}',
+        fileName: '${f['name']}',
         expiresAt: out['expiresAt'],
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text('下载附件', style: theme.textTheme.titleMedium),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: '刷新',
+                  onPressed: _loading ? null : _load,
+                ),
+                IconButton(
+                  icon: _staging
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.add_to_photos_outlined),
+                  tooltip: '添加文件到下载池',
+                  onPressed: _staging ? null : _addFile,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '仅 .dsh-download 下载池内文件可下载；点「＋」从磁盘复制文件入池',
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 8),
+          Expanded(child: _buildBody(theme)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(ThemeData theme) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) {
+      return Center(
+        child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center)),
+      );
+    }
+    final pool = _pool;
+    if (pool == null) return const SizedBox.shrink();
+    final items = List<Map<String, dynamic>>.from((pool['items'] as List? ?? []).cast<Map<String, dynamic>>());
+    final wsItems = items.where((e) => '${e['pool']}' == 'workspace').toList();
+    final gItems = items.where((e) => '${e['pool']}' == 'global').toList();
+    final ws = pool['workspace'] as Map<String, dynamic>?;
+    final g = pool['global'] as Map<String, dynamic>;
+
+    final tiles = <Widget>[
+      if (ws != null) ..._section(theme, '工作区下载池', '${ws['dir']}', wsItems),
+      ..._section(theme, '全局下载池', '${g['dir']}', gItems),
+      if (items.isEmpty)
+        const Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('下载池为空。点右上角「＋」从磁盘选文件添加。', textAlign: TextAlign.center),
+        ),
+    ];
+    return ListView(padding: const EdgeInsets.only(bottom: 12), children: tiles);
+  }
+
+  List<Widget> _section(ThemeData theme, String title, String dir, List<Map<String, dynamic>> files) {
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: theme.textTheme.labelLarge),
+          const SizedBox(height: 2),
+          Text(dir, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
+        ]),
+      ),
+      if (files.isEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: Text('（空）', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline)),
+        )
+      else
+        for (final f in files) _fileTile(theme, f),
+    ];
+  }
+
+  Widget _fileTile(ThemeData theme, Map<String, dynamic> f) {
+    final size = f['size'] is num ? (f['size'] as num).toInt() : 0;
+    final mtime = f['mtime'] is num ? (f['mtime'] as num).toInt() : 0;
+    final date = mtime > 0 ? DateTime.fromMillisecondsSinceEpoch(mtime) : null;
+    return ListTile(
+      dense: true,
+      leading: Icon(Icons.insert_drive_file_outlined, color: theme.colorScheme.primary),
+      title: Text('${f['name']}', maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        '${_fmtSize(size)}${date != null ? ' · ${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}' : ''}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: IconButton(
+        icon: const Icon(Icons.delete_outline),
+        tooltip: '从下载池删除',
+        onPressed: () => _delete(f),
+      ),
+      onTap: () => _download(f),
+    );
+  }
+
+  String _fmtSize(int n) {
+    if (n < 1024) return '$n B';
+    if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
+    if (n < 1024 * 1024 * 1024) return '${(n / 1024 / 1024).toStringAsFixed(1)} MB';
+    return '${(n / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
   }
 }
 

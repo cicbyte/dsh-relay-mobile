@@ -961,7 +961,9 @@ class _SessionPageState extends State<SessionPage> {
       );
       return;
     }
-    await DownloadFlow.start(context, widget.client, widget.deviceId);
+    // 工作区池跟随会话 cwd；无 cwd 的会话（如部分子代理）只有全局池
+    await DownloadFlow.start(context, widget.client, widget.deviceId,
+        workspaceRoot: widget.summary.cwd);
   }
 
   /// 选附件：图片留 base64 直传；其他文件即刻上传拿 receiptId。
