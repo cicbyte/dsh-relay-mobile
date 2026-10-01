@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
+import '../dsh/download_client.dart';
 import '../dsh/dsh_client.dart';
 import 'workspace_picker.dart';
 
@@ -116,18 +120,40 @@ class _DownloadSheet extends StatefulWidget {
 
 class _DownloadSheetState extends State<_DownloadSheet> {
   bool _downloading = false;
+  double? _progress; // 0..1；total 未知时为 null
   String? _done;
 
   Future<void> _download() async {
-    setState(() => _downloading = true);
-    final bytes = await widget.client.dlFetch(widget.downloadId, widget.deviceId);
-    if (!mounted) return;
     setState(() {
-      _downloading = false;
-      _done = bytes == null ? '下载失败' : '已下载 ${widget.fileName}（${bytes.length} 字节）';
+      _downloading = true;
+      _progress = null;
+      _done = null;
     });
-    // 实际落盘到手机存储可后续接 path_provider + File.writeAsBytes；
-    // 当前先确认 app 内拉取字节成功（传输层二进制验证）。
+    try {
+      // 落盘 app 私有目录（应用文档目录）
+      final dir = await getApplicationDocumentsDirectory();
+      final dest = File('${dir.path}/${widget.fileName}');
+      final ok = await DownloadClient(widget.client.downloadBase).fetchToFile(
+        widget.downloadId,
+        widget.deviceId,
+        dest,
+        onProgress: (received, total) {
+          if (!mounted) return;
+          setState(() => _progress = total > 0 ? received / total : null);
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _downloading = false;
+        _done = ok ? '已保存到 ${dest.path}' : '下载失败';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _downloading = false;
+        _done = '下载失败：$e';
+      });
+    }
   }
 
   void _copyLink() {
@@ -152,6 +178,10 @@ class _DownloadSheetState extends State<_DownloadSheet> {
               Text('下载附件', style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               Text(widget.fileName, style: theme.textTheme.bodyLarge),
+              if (_downloading) ...[
+                const SizedBox(height: 12),
+                LinearProgressIndicator(value: _progress),
+              ],
               if (_done != null) ...[
                 const SizedBox(height: 8),
                 Text(_done!, style: theme.textTheme.bodySmall),

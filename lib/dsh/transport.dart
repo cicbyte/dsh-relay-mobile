@@ -16,6 +16,10 @@ abstract class DshTransport {
   /// 打开一条到 [path]（如 /api/remote.mux）的 WS 隧道，返回文本帧双工通道。
   Future<TransportSocket> openSocket(String path, {Map<String, String> headers = const {}});
 
+  /// 流式下载的可达 HTTP base：直连=宿主地址（方案 C）；隧道=relay 地址（方案 B 代理）。
+  /// DownloadClient 用它做原生 HTTP 流式下载。
+  Uri get downloadBase;
+
   Future<void> close();
 }
 
@@ -48,6 +52,9 @@ class TransportException implements Exception {
 class DirectTransport extends DshTransport {
   final Uri base;
   DirectTransport(this.base);
+
+  @override
+  Uri get downloadBase => base;
 
   Uri _path(String p) => base.replace(path: p, query: null);
 
@@ -178,6 +185,9 @@ bool isAuthReject(String code) => const {
 
 class RelayTransport extends DshTransport {
   final Uri relay;
+
+  @override
+  Uri get downloadBase => relay;
 
   /// 房间码（寻址；带令牌/绑房间配对码时可为空）
   final String code;

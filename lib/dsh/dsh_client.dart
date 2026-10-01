@@ -121,6 +121,9 @@ class DshClient {
     }
   }
 
+  /// 流式下载的可达 HTTP base（直连=宿主 / 隧道=relay）。
+  Uri get downloadBase => transport.downloadBase;
+
   /// 创建附件下载链接（设备绑定、默认 30min、上限 7 天）：{ downloadId, expiresAt, ttl }。
   /// [deviceId] 经 x-device-id 头绑定（方案 A，不进链接明文）。失败返回 null。
   Future<Map<String, dynamic>?> dlCreate(String filePath, {int? expiresInSec, required String deviceId}) async {
