@@ -165,13 +165,14 @@ class DshClient {
   }
 
   /// 隧道流式下载字节流（大文件经分块）。仅隧道传输有效；直连返回 null（走 DownloadClient HttpClient）。
-  Stream<List<int>>? dlStream(String downloadId, String deviceId) {
+  /// [onMeta] 收到首块 contentLength 时回调（进度 total）。
+  Stream<List<int>>? dlStream(String downloadId, String deviceId, {void Function(int contentLength)? onMeta}) {
     final q = Uri(
       path: '/mobile-bridge/dl/$downloadId',
       queryParameters: {'d': deviceId},
     ).toString();
     try {
-      return (transport as dynamic).streamRequest('GET', q, headers: {'x-device-id': deviceId}) as Stream<List<int>>;
+      return (transport as dynamic).streamRequest('GET', q, headers: {'x-device-id': deviceId}, onMeta: onMeta) as Stream<List<int>>;
     } catch (_) {
       return null;
     }

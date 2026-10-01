@@ -134,15 +134,21 @@ class _DownloadSheetState extends State<_DownloadSheet> {
       final dir = await getApplicationDocumentsDirectory();
       final dest = File('${dir.path}/${widget.fileName}');
       // 隧道流式（分块）优先；直连不可用时回退 HttpClient
-      final stream = widget.client.dlStream(widget.downloadId, widget.deviceId);
+      int? total;
+      final stream = widget.client.dlStream(
+        widget.downloadId,
+        widget.deviceId,
+        onMeta: (cl) => total = cl,
+      );
       final ok = await DownloadClient(widget.client.downloadBase).fetchToFile(
         widget.downloadId,
         widget.deviceId,
         dest,
         streamSource: stream,
-        onProgress: (received, total) {
+        onProgress: (received, t) {
           if (!mounted) return;
-          setState(() => _progress = total > 0 ? received / total : null);
+          final tt = t > 0 ? t : (total ?? -1);
+          setState(() => _progress = tt > 0 ? received / tt : null);
         },
       );
       if (!mounted) return;

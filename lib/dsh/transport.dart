@@ -212,6 +212,8 @@ class RelayTransport extends DshTransport {
   final Map<String, Completer<Map<String, dynamic>>> _pending = {};
   // 流式下载（大文件分块）：rid -> 字节 StreamController，http-res chunk 帧逐块喂
   final Map<String, StreamController<List<int>>> _streams = {};
+  // 流式下载元数据回调：rid -> onMeta（contentLength，进度 total）
+  final Map<String, void Function(int)?> _streamMeta = {};
   final Map<String, StreamController<String>> _sockets = {};
   final StreamController<Map<String, dynamic>> _events = StreamController.broadcast();
   bool _closed = false;
@@ -393,9 +395,17 @@ class RelayTransport extends DshTransport {
         // 流式分块（下载大文件）：chunk 帧喂 StreamController，last 帧收尾（含 status）
         final sc = _streams[rid];
         if (sc != null && frame['type'] == 'http-res' && frame['chunk'] != null) {
+          // 首块带 contentLength → 进度 total
+          final cl = frame['contentLength'];
+          if (cl is num) {
+            final meta = _streamMeta.remove(rid);
+            if (cl.toInt() > 0) meta?.call(cl.toInt());
+          }
           try {
             sc.add(base64.decode('${frame['chunk']}'));
           } catch (_) {}
+          // 背压 ack：确认收到块 → 桥滑动窗口推进
+          _ws?.add(jsonEncode({'type': 'dl-ack', 'rid': rid}));
           if (frame['last'] == true) {
             _streams.remove(rid);
             sc.close();
@@ -533,10 +543,12 @@ class RelayTransport extends DshTransport {
 
   /// 流式下载（大文件经隧道分块）：发 stream:true 的 http-req，返回字节流。
   /// 桥逐块回 http-res chunk 帧，这里喂 StreamController。下载大 APK 不进内存。
+  /// [onMeta] 收到首块 contentLength 时回调（进度 total）。
   Stream<List<int>> streamRequest(
     String method,
     String path, {
     Map<String, String> headers = const {},
+    void Function(int contentLength)? onMeta,
   }) async* {
     await _ensureConnected();
     final ws = _ws;
@@ -544,6 +556,7 @@ class RelayTransport extends DshTransport {
     final rid = '${DateTime.now().microsecondsSinceEpoch}-${_streams.length}';
     final controller = StreamController<List<int>>();
     _streams[rid] = controller;
+    _streamMeta[rid] = onMeta;
     ws.add(jsonEncode({
       'type': 'http-req',
       'rid': rid,
