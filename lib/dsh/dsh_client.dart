@@ -168,14 +168,19 @@ class DshClient {
   }
 
   /// 隧道流式下载字节流（大文件经分块）。仅隧道传输有效；直连返回 null（走 DownloadClient HttpClient）。
-  /// [onMeta] 收到首块 contentLength 时回调（进度 total）。
-  Stream<List<int>>? dlStream(String downloadId, String deviceId, {void Function(int contentLength)? onMeta}) {
+  /// [offset] 本地断点（>0 时发 Range 续传，桥转发 range 头、dsh 侧回 206）。
+  /// [onMeta] 首块元数据（contentLength, status）：206 时 contentLength=剩余长度。
+  Stream<List<int>>? dlStream(String downloadId, String deviceId,
+      {int offset = 0, void Function(int contentLength, int status)? onMeta}) {
     final q = Uri(
       path: '/mobile-bridge/dl/$downloadId',
       queryParameters: {'d': deviceId},
     ).toString();
     try {
-      return (transport as dynamic).streamRequest('GET', q, headers: {'x-device-id': deviceId}, onMeta: onMeta) as Stream<List<int>>;
+      return (transport as dynamic).streamRequest('GET', q, headers: {
+        'x-device-id': deviceId,
+        if (offset > 0) 'range': 'bytes=$offset-',
+      }, onMeta: onMeta) as Stream<List<int>>;
     } catch (_) {
       return null;
     }

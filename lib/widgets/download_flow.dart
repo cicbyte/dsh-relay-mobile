@@ -374,22 +374,21 @@ class _DownloadSheetState extends State<_DownloadSheet> {
       // 落盘 app 私有目录（应用文档目录）
       final dir = await getApplicationDocumentsDirectory();
       final dest = File('${dir.path}/${widget.fileName}');
-      // 隧道流式（分块）优先；直连不可用时回退 HttpClient
-      int? total;
-      final stream = widget.client.dlStream(
-        widget.downloadId,
-        widget.deviceId,
-        onMeta: (cl) => total = cl,
-      );
+      // 隧道流式（分块 + Range 断点续传）优先；直连不可用时回退 HttpClient。
+      // total 由 fetchToFile 经 meta 帧算好传入（206 时 = 断点 + 剩余）。
       final ok = await DownloadClient(widget.client.downloadBase).fetchToFile(
         widget.downloadId,
         widget.deviceId,
         dest,
-        streamSource: stream,
+        streamFactory: (offset, onMeta) => widget.client.dlStream(
+          widget.downloadId,
+          widget.deviceId,
+          offset: offset,
+          onMeta: onMeta,
+        ),
         onProgress: (received, t) {
           if (!mounted) return;
-          final tt = t > 0 ? t : (total ?? -1);
-          setState(() => _progress = tt > 0 ? received / tt : null);
+          setState(() => _progress = t > 0 ? received / t : null);
         },
       );
       if (!mounted) return;

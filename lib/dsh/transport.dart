@@ -212,8 +212,9 @@ class RelayTransport extends DshTransport {
   final Map<String, Completer<Map<String, dynamic>>> _pending = {};
   // 流式下载（大文件分块）：rid -> 字节 StreamController，http-res chunk 帧逐块喂
   final Map<String, StreamController<List<int>>> _streams = {};
-  // 流式下载元数据回调：rid -> onMeta（contentLength，进度 total）
-  final Map<String, void Function(int)?> _streamMeta = {};
+  // 流式下载元数据回调：rid -> onMeta(contentLength, status)
+  // contentLength：200=全文长度 / 206=剩余长度 / 0=错误或 416（无载荷）
+  final Map<String, void Function(int, int)?> _streamMeta = {};
   final Map<String, StreamController<String>> _sockets = {};
   final StreamController<Map<String, dynamic>> _events = StreamController.broadcast();
   bool _closed = false;
@@ -415,11 +416,13 @@ class RelayTransport extends DshTransport {
         // 流式分块（下载大文件）：chunk 帧喂 StreamController，last 帧收尾（含 status）
         final sc = _streams[rid];
         if (sc != null && frame['type'] == 'http-res') {
-          // 元数据帧：meta.contentLength → 进度 total（载荷走二进制帧 _handleBinaryFrame）
+          // 元数据帧：meta.contentLength/status → 进度 total + 续传判定
+          // （载荷走二进制帧 _handleBinaryFrame；cl 可为 0——416/错误路径也要回调）
           final meta = frame['meta'];
           if (meta is Map && meta['contentLength'] is num) {
             final cl = (meta['contentLength'] as num).toInt();
-            if (cl > 0) _streamMeta.remove(rid)?.call(cl);
+            final st = meta['status'] is num ? (meta['status'] as num).toInt() : 0;
+            _streamMeta.remove(rid)?.call(cl, st);
           }
           // last 帧：收尾
           if (frame['last'] == true) {
@@ -592,12 +595,13 @@ class RelayTransport extends DshTransport {
 
   /// 流式下载（大文件经隧道分块）：发 stream:true 的 http-req，返回字节流。
   /// 桥逐块回 http-res chunk 帧，这里喂 StreamController。下载大 APK 不进内存。
-  /// [onMeta] 收到首块 contentLength 时回调（进度 total）。
+  /// [onMeta] 收到首块元数据时回调（contentLength, status）：200=全文长度 /
+  /// 206=剩余长度（Range 续传）/ ≥400=错误（流随后空结束，不挂死）。
   Stream<List<int>> streamRequest(
     String method,
     String path, {
     Map<String, String> headers = const {},
-    void Function(int contentLength)? onMeta,
+    void Function(int contentLength, int status)? onMeta,
   }) async* {
     await _ensureConnected();
     final ws = _ws;
