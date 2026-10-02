@@ -42,7 +42,7 @@ class SessionPage extends StatefulWidget {
   State<SessionPage> createState() => _SessionPageState();
 }
 
-class _SessionPageState extends State<SessionPage> {
+class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   late final DshMux _mux;
   StreamSubscription<Map<String, dynamic>>? _sub;
 
@@ -169,6 +169,7 @@ class _SessionPageState extends State<SessionPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // 回前台自动恢复（后台杀连接是常态）
     _mux = DshMux(widget.client);
     InteractionCenter.I.ensureStarted(widget.client);
     _inputCtrl.addListener(_onInputChanged);
@@ -181,8 +182,22 @@ class _SessionPageState extends State<SessionPage> {
     _start();
   }
 
+  /// 回前台自愈：连接活着就重订阅拿最新快照（按 seq 合并不跳滚动）；
+  /// 断了就立即 kick 重连（不等退避定时器），成功后 onReconnected 自动补订阅。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    if (_mux.isConnected) {
+      _openFollow();
+    } else {
+      if (_error == null) setState(() => _error = '连接中断，自动重连中…');
+      _mux.kick();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _sub?.cancel();
     _controlSub?.cancel();
@@ -227,15 +242,20 @@ class _SessionPageState extends State<SessionPage> {
         _openFollow();
         return;
       }
-      if (mounted) setState(() => _error = msg);
+      if (mounted) {
+        // 断连由 DshMux 持续自动重连兜底：提示恢复中，而非要求手动操作
+        setState(() => _error = msg.contains('mux/disconnected') ? '连接已断开，自动重连中…' : msg);
+      }
     }, onDone: () {
-      if (mounted && _error == null) setState(() => _error = '连接已断开（下拉或点重试恢复）');
+      // 自动重连进行中（DshMux 持续重试）：提示而非要求手动操作
+      if (mounted && _error == null) setState(() => _error = '连接已断开，自动重连中…');
     });
   }
 
   void _onFrame(Map<String, dynamic> frame) {
     _gotFrame = true;
     setState(() {
+      if (_error != null) _error = null; // 流恢复即清错误横幅
       switch (frame['type']) {
         case 'snapshot':
           final cursor = (frame['cursor'] as num? ?? 0).toInt();

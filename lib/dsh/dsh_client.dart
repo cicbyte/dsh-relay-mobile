@@ -541,7 +541,10 @@ class DshMux {
   TransportSocket? _sock;
   final Map<String, StreamController<Map<String, dynamic>>> _streams = {};
   bool _closed = false;
-  bool _reconnecting = false;
+  bool _reconnecting = false; // 重连已武装（定时器挂起或尝试在途）
+  bool _connecting = false; // connect() 调用在途（防并发双连接）
+  Timer? _retryTimer;
+  int _retryMs = 2000;
 
   /// 断线自动重连成功后的回调（上层用于自动重订阅逻辑流）。
   void Function()? onReconnected;
@@ -594,18 +597,49 @@ class DshMux {
       if (!c.isClosed) c.addError(DshRpcException('mux/disconnected', '流通道断开'));
     }
     _streams.clear();
-    // 单飞重连：3s 后自动重连一次，成功后通知上层重订阅
-    if (!_reconnecting) {
-      _reconnecting = true;
-      Timer(const Duration(seconds: 3), () async {
-        _reconnecting = false;
-        if (_closed || _sock != null) return;
-        try {
-          await connect();
-          onReconnected?.call();
-        } catch (_) {/* 上层展示错误并提供手动重试 */}
-      });
+    _armRetry();
+  }
+
+  /// 持续重连（无限次直到成功/close）：此前只单飞试一次，后台/休眠期那一次
+  /// 失败后流通道永久躺平——「回前台数据陈旧、错误横幅要求手动重试」的根因。
+  void _armRetry() {
+    if (_closed || _sock != null || _reconnecting) return;
+    _reconnecting = true;
+    _retryTimer = Timer(Duration(milliseconds: _retryMs), () {
+      _retryTimer = null;
+      _attemptReconnect();
+    });
+  }
+
+  Future<void> _attemptReconnect() async {
+    if (_closed || _sock != null || _connecting) {
+      _reconnecting = false;
+      return;
     }
+    _connecting = true;
+    try {
+      await connect();
+      _retryMs = 2000; // 成功复位快档
+      _reconnecting = false;
+      onReconnected?.call(); // 上层自动重订阅（快照补齐增量，UI 自愈）
+    } catch (_) {
+      _retryMs = (_retryMs * 2).clamp(2000, 15000); // 指数退避封顶 15s
+      _reconnecting = false;
+      _armRetry();
+    } finally {
+      _connecting = false;
+    }
+  }
+
+  /// 立即恢复（App 从后台回前台时调用）：已连接则无事发生；
+  /// 断线中则跳过剩余退避马上尝试——回前台秒级自愈，不等定时器。
+  Future<void> kick() async {
+    if (_closed || _connecting) return;
+    if (_sock != null) return;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _reconnecting = false;
+    await _attemptReconnect();
   }
 
   /// 打开一条逻辑流。[endpoint] 形如 "session/follow"。
@@ -633,6 +667,9 @@ class DshMux {
 
   void close() {
     _closed = true;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _reconnecting = false;
     _sock?.close();
     _sock = null;
     for (final c in _streams.values) {

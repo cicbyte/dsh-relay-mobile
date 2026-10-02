@@ -67,9 +67,12 @@ class InteractionCenter {
     _mux = mux;
     mux.onReconnected = _openStream;
     mux.connect().then((_) => _openStream()).catchError((_) {
-      // 连接失败由 DshMux 的 3s 单飞重连兜底；onReconnected 时补开流。
+      // 连接失败由 DshMux 的持续重连兜底；onReconnected 时补开流。
     });
   }
+
+  /// 立即恢复事件流连接（App 回前台时由壳层调用）。
+  void kick() => _mux?.kick();
 
   void _openStream() {
     final mux = _mux;

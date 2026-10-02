@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'dsh/conn_store.dart';
 import 'dsh/dsh_client.dart';
+import 'dsh/interactions.dart';
 import 'dsh/profiles.dart';
 import 'dsh/transport.dart';
 import 'pages/session_page.dart';
@@ -17,7 +18,7 @@ class AppRoot extends StatefulWidget {
   State<AppRoot> createState() => _AppRootState();
 }
 
-class _AppRootState extends State<AppRoot> {
+class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> rootScaffoldKey = GlobalKey<ScaffoldState>();
   final ValueNotifier<int> tabIndex = ValueNotifier<int>(0);
 
@@ -38,7 +39,18 @@ class _AppRootState extends State<AppRoot> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // 回前台自动恢复（后台杀连接是常态）
     _autoConnect();
+  }
+
+  /// 回前台自愈：刷新会话列表（后台期间的状态变化一次补齐）+ 唤醒全局事件流
+  /// （$events 重连会补投 pending，无需对账）。传输层重连由 RelayTransport
+  /// 自愈循环 + 各 mux 的持续重试负责，这里只做数据面刷新。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    InteractionCenter.I.kick();
+    if (_client != null && !_sessionsLoading) refreshSessions();
   }
 
   /// 启动自动重连：用上次的活动环境直接连（Profile 持久化，免每次手配）。
@@ -102,6 +114,7 @@ class _AppRootState extends State<AppRoot> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     tabIndex.dispose();
     _transport?.close();
     super.dispose();

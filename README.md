@@ -35,6 +35,10 @@ DSH 的 Flutter 移动端客户端（Android 优先），通过 DSH 服务端协
 - **对齐 web 版功能点**：「深度求索中…」运行态指示（秒级计时）；「轨迹」视图
   （全部事件按轮分组时间线 + 搜索 + JSON 展开，含 step/ 审计事件）
 - 连接层：`lib/dsh/transport.dart`（直连/转发两种传输可插拔）+ `lib/dsh/dsh_client.dart`
+- **后台恢复自愈**：mux 流断开后持续自动重连（指数退避封顶 15s，无限次——
+  原单飞重试一次失败即躺平，是「回前台数据陈旧/要求手动重试」的根因）；
+  App 回前台立即 kick 重连 + 重订阅拿最新快照（按 seq 合并不跳滚动），
+  会话列表与 `$events` 交互流同步刷新；断线横幅改为「自动重连中」，恢复即自动清除
   （token→cookie 鉴权、`client-request` RPC 封套、`/api/remote.mux` 多路复用流、
   单飞自动重连 + 自动重订阅）
 - 时区修复：`session/prompt` 的 `clientTimeZone` 只收 IANA 名（Dart 的 timeZoneName
