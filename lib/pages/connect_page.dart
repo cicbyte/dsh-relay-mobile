@@ -120,6 +120,9 @@ class _ConnectPageState extends State<ConnectPage> {
       await ProfileStore.save(_profiles);
       await ProfileStore.setActive(p.id);
       await widget.onConnected(transport: transport, client: client, modeLabel: modeLabel);
+      // 连接成功即回会话页：onConnected 已切 tab 0，这里把本页弹出，
+      // 不再让页面堆栈停在连接页要手动返回（2026-10-01 记录的 UX 瑕疵）
+      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
     } catch (e) {
       final msg = e is TransportException ? _friendlyError(e) : '$e';
       p.lastError = msg;

@@ -11,6 +11,10 @@ Future<void> main() async {
 
 /// 皮肤状态（全局单例，声明在 theme.dart）：抽屉切换器写这里，MaterialApp 监听重建。
 
+/// 全局 ScaffoldMessenger：下载面板被关掉后，后台下载完成/失败的通知
+/// 没有局部 context 可用，统一从这里发（App 任意位置可见）。
+final rootMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
 class DshMobileApp extends StatelessWidget {
   const DshMobileApp({super.key, this.initialSkin = DshSkin.darkGlass});
 
@@ -27,6 +31,7 @@ class DshMobileApp extends StatelessWidget {
           title: 'DSH Mobile',
           debugShowCheckedModeBanner: false,
           theme: theme,
+          scaffoldMessengerKey: rootMessengerKey,
           // 换肤走颜色补间（ThemeData + SkinTokens 全量 lerp）：~240ms 平滑过渡，杜绝闪屏。
           builder: (context, child) => AnimatedTheme(
             data: theme,

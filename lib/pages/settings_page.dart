@@ -95,7 +95,7 @@ class SettingsPage extends StatelessWidget {
               SettingsTile(
                 icon: Icons.info_outline,
                 title: '版本',
-                trailing: _value(context, '1.0.0+1'),
+                trailing: _value(context, '1.1.0'),
               ),
               settingsDivider(context),
               SettingsTile(

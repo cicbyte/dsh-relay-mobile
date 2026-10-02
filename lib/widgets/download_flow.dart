@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../device_info.dart';
 import '../dsh/download_client.dart';
 import '../dsh/dsh_client.dart';
+import '../main.dart';
 import 'workspace_picker.dart';
 
 /// 附件下载流程（下载池模型）：手机只能下载「下载池」内文件——
@@ -105,6 +106,10 @@ class _PoolSheetState extends State<PoolSheet> {
   bool _loading = true;
   String? _error;
   bool _staging = false;
+  // 入池复制进度（新桥 taskId 轮询；老桥阻塞式无进度）
+  String? _stageName;
+  int _stageCopied = 0;
+  int _stageTotal = 0;
 
   @override
   void initState() {
@@ -133,11 +138,17 @@ class _PoolSheetState extends State<PoolSheet> {
   }
 
   /// 添加文件：全盘选文件 → 复制入池。有会话工作区入工作区池，否则入全局池。
+  /// 新桥异步复制（taskId + 轮询进度条）；老桥阻塞到完成（转圈）。
   Future<void> _addFile() async {
     if (_staging) return;
     final file = await WorkspacePicker.show(context, widget.client, pickFile: true);
     if (file == null || file.isEmpty || !mounted) return;
-    setState(() => _staging = true);
+    setState(() {
+      _staging = true;
+      _stageName = null;
+      _stageCopied = 0;
+      _stageTotal = 0;
+    });
     final hasWs = widget.workspaceRoot != null;
     final out = await widget.client.dlStage(
       file,
@@ -146,11 +157,40 @@ class _PoolSheetState extends State<PoolSheet> {
       toWorkspace: hasWs,
     );
     if (!mounted) return;
+    if (out == null) {
+      setState(() => _staging = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('添加失败（复制未开始）')));
+      return;
+    }
+    final name = '${out['name']}';
+    final taskId = out['taskId'] is String ? out['taskId']! as String : '';
+    setState(() => _stageName = name);
+    String? stageError;
+    if (taskId.isNotEmpty) {
+      // 轮询复制进度直到完成（面板被关/重置时静默退出）
+      while (mounted && _staging) {
+        await Future.delayed(const Duration(milliseconds: 700));
+        if (!mounted || !_staging) return;
+        final p = await widget.client.dlStageProgress(taskId);
+        if (p == null) break; // 任务过期（>10min 清理）：按完成处理，池列表刷新兜底
+        setState(() {
+          _stageCopied = (p['copied'] as num?)?.toInt() ?? 0;
+          _stageTotal = (p['total'] as num?)?.toInt() ?? 0;
+        });
+        if (p['done'] == true) {
+          final err = '${p['error'] ?? ''}';
+          if (err.isNotEmpty) stageError = err;
+          break;
+        }
+      }
+    }
+    if (!mounted) return;
     setState(() => _staging = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(out != null ? '已添加到下载池：${out['name']}' : '添加失败（复制未完成）'),
+      content: Text(stageError != null ? '添加失败：$stageError' : '已添加到下载池：$name'),
     ));
-    if (out != null) await _load();
+    if (stageError == null) await _load();
   }
 
   Future<void> _delete(Map<String, dynamic> f) async {
@@ -256,6 +296,31 @@ class _PoolSheetState extends State<PoolSheet> {
               ],
             ),
           ),
+          // 入池复制进度（新桥）：文件名 + 已复制/总量
+          if (_staging)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  LinearProgressIndicator(
+                    value: _stageTotal > 0 ? _stageCopied / _stageTotal : null,
+                  ),
+                  if (_stageName != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _stageTotal > 0
+                            ? '添加中：$_stageName（${_fmtSize(_stageCopied)} / ${_fmtSize(_stageTotal)}）'
+                            : '添加中：$_stageName…',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                ],
+              ),
+            ),
           const Divider(height: 8),
           Expanded(child: _buildBody(theme)),
         ],
@@ -400,7 +465,15 @@ class _DownloadSheetState extends State<_DownloadSheet> {
           setState(() => _progress = t > 0 ? received / t : null);
         },
       );
-      if (!mounted) return;
+      if (!mounted) {
+        // 面板已被关掉：下载仍在后台跑完，用全局 messenger 发完成通知
+        rootMessengerKey.currentState?.showSnackBar(SnackBar(
+          content: Text(_cancelled
+              ? '已取消下载：${widget.fileName}（断点已保留）'
+              : (ok ? '下载完成：${widget.fileName}' : '下载失败：${widget.fileName}')),
+        ));
+        return;
+      }
       setState(() {
         _downloading = false;
         _downloadOk = ok;
@@ -409,7 +482,11 @@ class _DownloadSheetState extends State<_DownloadSheet> {
             : (ok ? '已保存到 ${dest.path}' : '下载失败');
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        rootMessengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('下载失败：${widget.fileName}')));
+        return;
+      }
       setState(() {
         _downloading = false;
         _done = _cancelled ? '已取消（已下载部分保留，可断点续传）' : '下载失败：$e';
