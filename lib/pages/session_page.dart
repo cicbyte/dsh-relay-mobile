@@ -2344,8 +2344,8 @@ class _SessionPageState extends State<SessionPage> {
                                   onPressed: _sending ? null : _pickFiles,
                                 ),
                                 _composerIcon(
-                                  icon: Icons.download_outlined,
-                                  tooltip: '下载附件',
+                                  icon: Icons.folder_shared_outlined,
+                                  tooltip: '共享文件区',
                                   onPressed: _startDownload,
                                 ),
                                 _composerIcon(

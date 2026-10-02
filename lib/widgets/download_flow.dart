@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,12 +11,12 @@ import '../dsh/download_client.dart';
 import '../dsh/dsh_client.dart';
 import '../main.dart';
 
-/// 附件下载流程（只读下载池模型）：手机只能下载「下载池」内文件——
-/// 工作区池 `<会话cwd>/.dsh-download` 与 全局池 `$DSH_HOME/.dsh-download`。
-/// 池内容只由桌面侧放入（资源管理器/终端/DSH 会话直接写池目录），手机无入池入口；
-/// 桥端 dl-create 强制校验池内路径，绕过 UI 也拿不到池外任何字节。
+/// 共享文件区流程（双向共享模型）：手机 ⇄ 桌面（含 agent）的文件交换区——
+/// 工作区区 `<会话cwd>/.dsh-share` 与 全局区 `$DSH_HOME/.dsh-share`。
+/// 下行：手机下载区内文件（dl-create 强制区内路径，绕过 UI 也拿不到区外字节）。
+/// 上行：手机分块上传进区（share-upload-*，唯一写通道），agent 直接读写该目录。
 class DownloadFlow {
-  /// 入口：弹下载池面板。[workspaceRoot] 为当前会话 cwd；空/无工作区会话只有全局池。
+  /// 入口：弹共享文件区面板。[workspaceRoot] 为当前会话 cwd；空/无工作区会话只有全局区。
   static Future<void> start(
     BuildContext context,
     DshClient client,
@@ -83,9 +85,8 @@ class DownloadFlow {
   }
 }
 
-/// 下载池面板（只读池）：列出工作区池 + 全局池，点选下载、可删池内副本。
-/// 入池只能由桌面侧完成（资源管理器/终端/DSH 会话直接往 .dsh-download 放文件），
-/// 手机端没有任何入池入口——配对手机拿不到池外任何字节。
+/// 共享文件区面板：工作区区 + 全局区列表；手机上传（分块/断点/可取消）/
+/// 点选下载 / 删除副本 / 长按复制路径。桌面侧（人或 agent）直接读写 .dsh-share 目录。
 class PoolSheet extends StatefulWidget {
   final DshClient client;
   final String deviceId;
@@ -106,6 +107,12 @@ class _PoolSheetState extends State<PoolSheet> {
   Map<String, dynamic>? _pool;
   bool _loading = true;
   String? _error;
+  // 上传状态（分块 + 断点续传，可取消）
+  bool _uploading = false;
+  bool _upCancel = false;
+  String _upName = '';
+  int _upSent = 0;
+  int _upTotal = 0;
 
   @override
   void initState() {
@@ -123,7 +130,7 @@ class _PoolSheetState extends State<PoolSheet> {
     if (r == null) {
       setState(() {
         _loading = false;
-        _error = '无法获取下载池（插件旧版本或未连接）';
+        _error = '无法获取共享区（插件旧版本或未连接）';
       });
       return;
     }
@@ -133,13 +140,94 @@ class _PoolSheetState extends State<PoolSheet> {
     });
   }
 
+  /// 从手机上传文件到共享区（agent 可直接读）：
+  /// init（同名 .part 自动断点续传）→ 256KB 分块 base64 追加 → done 转正。
+  /// 有会话工作区传工作区区（该会话 agent 直接可见），否则传全局区。
+  Future<void> _upload() async {
+    if (_uploading) return;
+    final picked = await FilePicker.platform.pickFiles(allowMultiple: false, withData: false);
+    if (picked.files.isEmpty || !mounted) return;
+    final pf = picked.files.first;
+    if (pf.path == null || pf.path!.isEmpty) return;
+    final local = File(pf.path!);
+    final size = pf.size;
+    final hasWs = widget.workspaceRoot != null;
+    setState(() {
+      _uploading = true;
+      _upCancel = false;
+      _upName = pf.name;
+      _upSent = 0;
+      _upTotal = size;
+    });
+    String? uploadId;
+    String? failMsg;
+    String? donePath;
+    try {
+      final init = await widget.client.shareUploadInit(
+        pf.name,
+        size,
+        deviceId: widget.deviceId,
+        workspaceRoot: widget.workspaceRoot,
+        toWorkspace: hasWs,
+      );
+      if (init == null) {
+        failMsg = '初始化失败（插件旧版本？）';
+      } else if (init['done'] == true) {
+        donePath = '${init['path']}'; // 空文件：init 直接落盘
+      } else {
+        uploadId = '${init['uploadId']}';
+        var offset = (init['offset'] as num?)?.toInt() ?? 0;
+        if (offset > 0) setState(() => _upSent = offset); // 断点续传起点
+        final raf = await local.open(mode: FileMode.read);
+        try {
+          if (offset > 0) await raf.setPosition(offset);
+          const chunkSize = 256 * 1024;
+          while (offset < size && mounted && !_upCancel) {
+            final data = await raf.read(chunkSize);
+            if (data.isEmpty) break;
+            final r = await widget.client.shareUploadChunk(uploadId, offset, base64Encode(data));
+            if (r == null) {
+              failMsg = '块上传失败（会话过期/网络断）：重试将自动续传';
+              break;
+            }
+            offset = (r['offset'] as num?)?.toInt() ?? (offset + data.length);
+            if (mounted) setState(() => _upSent = offset);
+            if (r['done'] == true) {
+              donePath = '${r['path']}';
+              break;
+            }
+          }
+        } finally {
+          await raf.close();
+        }
+      }
+    } catch (e) {
+      failMsg = '上传失败：$e';
+    }
+    // 取消：删服务端半成品（留着也行——下次同名续传，但明确清理更干净）
+    if (_upCancel && uploadId != null && uploadId.isNotEmpty) {
+      await widget.client.shareUploadAbort(uploadId, deviceId: widget.deviceId);
+    }
+    if (!mounted) return;
+    setState(() => _uploading = false);
+    final messenger = ScaffoldMessenger.of(context);
+    if (_upCancel) {
+      messenger.showSnackBar(const SnackBar(content: Text('已取消上传（已传部分将在下次同名上传时续用）')));
+    } else if (failMsg != null) {
+      messenger.showSnackBar(SnackBar(content: Text(failMsg)));
+    } else {
+      messenger.showSnackBar(SnackBar(content: Text('已上传到共享区：$_upName\n（agent 可直接读取：$donePath）')));
+      await _load();
+    }
+  }
+
   Future<void> _delete(Map<String, dynamic> f) async {
     final name = '${f['name']}';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('从下载池删除'),
-        content: Text('删除池内副本「$name」？\n（仅删除 .dsh-download 里的副本，不影响原文件）'),
+        title: const Text('从共享区删除'),
+        content: Text('删除共享区文件「$name」？\n（仅删除 .dsh-share 里的这个文件）'),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
           FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('删除')),
@@ -202,7 +290,22 @@ class _PoolSheetState extends State<PoolSheet> {
             child: Row(
               children: [
                 Expanded(
-                  child: Text('下载附件', style: theme.textTheme.titleMedium),
+                  child: Text('共享文件区', style: theme.textTheme.titleMedium),
+                ),
+                IconButton(
+                  icon: _uploading
+                      ? const Icon(Icons.stop_circle_outlined)
+                      : const Icon(Icons.upload_outlined),
+                  tooltip: _uploading ? '取消上传' : '从手机上传文件',
+                  onPressed: _loading
+                      ? null
+                      : () {
+                          if (_uploading) {
+                            setState(() => _upCancel = true);
+                          } else {
+                            _upload();
+                          }
+                        },
                 ),
                 IconButton(
                   icon: const Icon(Icons.refresh),
@@ -222,13 +325,37 @@ class _PoolSheetState extends State<PoolSheet> {
               children: [
                 Expanded(
                   child: Text(
-                    '只读下载池：文件由桌面端放入 .dsh-download 目录，手机仅可下载/删除池内副本',
+                    '双向共享：手机可⬆上传/下载；电脑侧（含 agent）直接读写 .dsh-share 目录',
                     style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
                   ),
                 ),
               ],
             ),
           ),
+          // 上传进度：文件名 + 已传/总量（分块续传，可中途取消）
+          if (_uploading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  LinearProgressIndicator(
+                    value: _upTotal > 0 ? _upSent / _upTotal : null,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      _upTotal > 0
+                          ? '上传中：$_upName（${_fmtSize(_upSent)} / ${_fmtSize(_upTotal)}）'
+                          : '上传中：$_upName…',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           const Divider(height: 8),
           Expanded(child: _buildBody(theme)),
         ],
@@ -252,12 +379,12 @@ class _PoolSheetState extends State<PoolSheet> {
     final g = pool['global'] as Map<String, dynamic>;
 
     final tiles = <Widget>[
-      if (ws != null) ..._section(theme, '工作区下载池', '${ws['dir']}', wsItems),
-      ..._section(theme, '全局下载池', '${g['dir']}', gItems),
+      if (ws != null) ..._section(theme, '工作区共享区', '${ws['dir']}', wsItems),
+      ..._section(theme, '全局共享区', '${g['dir']}', gItems),
       if (items.isEmpty)
         const Padding(
           padding: EdgeInsets.all(24),
-          child: Text('下载池为空。在电脑上把文件放入 .dsh-download 目录后点右上角刷新。', textAlign: TextAlign.center),
+          child: Text('共享区为空：电脑上把文件放进 .dsh-share 目录，或点右上角⬆从手机上传。', textAlign: TextAlign.center),
         ),
     ];
     return ListView(padding: const EdgeInsets.only(bottom: 12), children: tiles);
@@ -298,10 +425,16 @@ class _PoolSheetState extends State<PoolSheet> {
       ),
       trailing: IconButton(
         icon: const Icon(Icons.delete_outline),
-        tooltip: '从下载池删除',
+        tooltip: '从共享区删除',
         onPressed: () => _delete(f),
       ),
       onTap: () => _download(f),
+      // 长按复制服务器路径：贴给 agent / 会话直接引用共享区文件
+      onLongPress: () {
+        Clipboard.setData(ClipboardData(text: '${f['path']}'));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('已复制路径：${f['path']}')));
+      },
     );
   }
 

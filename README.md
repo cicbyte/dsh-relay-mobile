@@ -21,16 +21,17 @@ DSH 的 Flutter 移动端客户端（Android 优先），通过 DSH 服务端协
 - subagent 会话支持：`SessionAddress = {kind:'subagent', parentSessionId, childSessionId, mode}`
   （mode 在 one-shot / continuable 间自动兜底）；「子agent」面板走 `subagents/list` 目录
   进入子会话，continuable 子代理可发消息（`subagents/prompt`）/中断（`subagents/interruptByParent`）
-- **附件下载（只读下载池模型）**：手机只能下载「下载池」内文件——工作区池
-  `<会话cwd>/.dsh-download` + 全局池 `$DSH_HOME/.dsh-download`（无 cwd 会话只有全局池）；
-  池内容只由桌面侧放入（电脑上把文件放进 .dsh-download 目录），手机端没有入池入口，
-  也没有全盘文件名枚举（桥端 workspace-list 只列目录）。池内点选生成
-  设备绑定链接（默认 30min/上限 7 天）→ 流式下载或复制路径；池内副本可删。
+- **共享文件区（双向）**：手机 ⇄ 桌面（含 agent）的文件交换区——工作区区
+  `<会话cwd>/.dsh-share` + 全局区 `$DSH_HOME/.dsh-share`（无 cwd 会话只有全局区）。
+  下行：区内点选生成设备绑定链接（默认 30min/上限 7 天）→ 流式下载；上行：⬆ 从
+  手机选文件分块上传（断点续传/可取消，断网重试自动接续），落盘即普通文件，
+  agent 直接读写。长按文件行复制服务器路径可贴给会话引用。
   下载支持**双路 Range 断点续传**：断线重下从本地断点接着写（隧道 meta 帧带
   status 判定 206 追加/200 覆盖/416 已完整/≥400 失败不挂死），大文件不进内存。
   下载完成后可一键**保存到系统下载**（平台通道 `dsh/device`：Android 10+ 走
   MediaStore 免权限 + IS_PENDING 防半成品，旧版本回退公共 Downloads 目录）。
-  安全边界在桥端：`dl-create` 对池外路径一律 403，绕过手机 UI 也下不了任意磁盘文件
+  安全边界在桥端：读只限区内（`dl-create` 区外 403，绕过 UI 无效），写只经
+  分块上传进区（单文件 ≤512MB / 全区 ≤2GB），`workspace-list` 只列目录。
 - **对齐 web 版功能点**：「深度求索中…」运行态指示（秒级计时）；「轨迹」视图
   （全部事件按轮分组时间线 + 搜索 + JSON 展开，含 step/ 审计事件）
 - 连接层：`lib/dsh/transport.dart`（直连/转发两种传输可插拔）+ `lib/dsh/dsh_client.dart`

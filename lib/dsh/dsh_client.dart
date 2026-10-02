@@ -185,8 +185,8 @@ class DshClient {
     }
   }
 
-  /// 下载池列表：{ items: [{name,path,size,mtime,pool}], workspace, global }。
-  /// [workspaceRoot] 为当前会话 cwd（空则只有全局池）。插件旧版本返回 null。
+  /// 共享区列表：{ items: [{name,path,size,mtime,pool}], workspace, global }。
+  /// [workspaceRoot] 为当前会话 cwd（空则只有全局区）。插件旧版本返回 null。
   Future<Map<String, dynamic>?> dlPool({String? workspaceRoot}) async {
     try {
       final q = Uri(
@@ -207,7 +207,74 @@ class DshClient {
     }
   }
 
-  /// 删除下载池内文件。[fromWorkspace] 为 true 时删工作区池（需 [workspaceRoot]）。
+  /// 上传会话开启/续传：{ uploadId, name, path, offset(断点续传起点), chunkMax }。
+  /// size=0 时直接 done。失败返回 null（老桥无此路由同样 null）。
+  Future<Map<String, dynamic>?> shareUploadInit(String name, int size,
+      {required String deviceId, String? workspaceRoot, required bool toWorkspace}) async {
+    try {
+      final resp = await transport.request(
+        'POST',
+        '/mobile-bridge/share-upload-init',
+        headers: {'content-type': 'application/json; charset=utf-8', 'x-device-id': deviceId},
+        body: jsonEncode({
+          'name': name,
+          'size': size,
+          'deviceId': deviceId,
+          'target': toWorkspace ? 'workspace' : 'global',
+          if (workspaceRoot != null && workspaceRoot.isNotEmpty) 'workspaceRoot': workspaceRoot,
+        }),
+      );
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 上传一块：body 为 base64（隧道 body 走字符串转发）。返回 { done, offset, name?, path? }，
+  /// 服务端 offset 不匹配（409）/会话过期 → null（调用方应 abort 或重 init 续传）。
+  Future<Map<String, dynamic>?> shareUploadChunk(String uploadId, int offset, String base64Chunk) async {
+    try {
+      final q = Uri(
+        path: '/mobile-bridge/share-upload-chunk',
+        queryParameters: {'id': uploadId, 'offset': '$offset'},
+      ).toString();
+      final resp = await transport.request('POST', q, headers: {
+        'content-type': 'application/octet-stream',
+      }, body: base64Chunk);
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 放弃上传：删服务端 .part 半成品。失败静默（false）。
+  Future<bool> shareUploadAbort(String uploadId, {required String deviceId}) async {
+    try {
+      final resp = await transport.request(
+        'POST',
+        '/mobile-bridge/share-upload-abort',
+        headers: {'content-type': 'application/json; charset=utf-8', 'x-device-id': deviceId},
+        body: jsonEncode({'uploadId': uploadId, 'deviceId': deviceId}),
+      );
+      if (resp.status != 200 || resp.body.isEmpty) return false;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      return j['code'] == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 删除共享区内文件。[fromWorkspace] 为 true 时删工作区区（需 [workspaceRoot]）。
   Future<bool> dlPoolDelete(String name,
       {required String deviceId, String? workspaceRoot, required bool fromWorkspace}) async {
     try {
