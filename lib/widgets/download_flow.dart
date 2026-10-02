@@ -146,7 +146,7 @@ class _PoolSheetState extends State<PoolSheet> {
   Future<void> _upload() async {
     if (_uploading) return;
     final picked = await FilePicker.platform.pickFiles(allowMultiple: false, withData: false);
-    if (picked.files.isEmpty || !mounted) return;
+    if (picked == null || picked.files.isEmpty || !mounted) return;
     final pf = picked.files.first;
     if (pf.path == null || pf.path!.isEmpty) return;
     final local = File(pf.path!);
