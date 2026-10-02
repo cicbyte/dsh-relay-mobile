@@ -8,12 +8,11 @@ import '../device_info.dart';
 import '../dsh/download_client.dart';
 import '../dsh/dsh_client.dart';
 import '../main.dart';
-import 'workspace_picker.dart';
 
-/// 附件下载流程（下载池模型）：手机只能下载「下载池」内文件——
+/// 附件下载流程（只读下载池模型）：手机只能下载「下载池」内文件——
 /// 工作区池 `<会话cwd>/.dsh-download` 与 全局池 `$DSH_HOME/.dsh-download`。
-/// 要下载磁盘上的文件需先「添加到下载池」（桥端复制入池，原文件保留）；
-/// 桥端 dl-create 强制校验池内路径，选任意磁盘文件直接下发不再可能。
+/// 池内容只由桌面侧放入（资源管理器/终端/DSH 会话直接写池目录），手机无入池入口；
+/// 桥端 dl-create 强制校验池内路径，绕过 UI 也拿不到池外任何字节。
 class DownloadFlow {
   /// 入口：弹下载池面板。[workspaceRoot] 为当前会话 cwd；空/无工作区会话只有全局池。
   static Future<void> start(
@@ -84,7 +83,9 @@ class DownloadFlow {
   }
 }
 
-/// 下载池面板：池列表（工作区 + 全局）+ 添加文件（磁盘任意文件复制入池）+ 删除。
+/// 下载池面板（只读池）：列出工作区池 + 全局池，点选下载、可删池内副本。
+/// 入池只能由桌面侧完成（资源管理器/终端/DSH 会话直接往 .dsh-download 放文件），
+/// 手机端没有任何入池入口——配对手机拿不到池外任何字节。
 class PoolSheet extends StatefulWidget {
   final DshClient client;
   final String deviceId;
@@ -105,11 +106,6 @@ class _PoolSheetState extends State<PoolSheet> {
   Map<String, dynamic>? _pool;
   bool _loading = true;
   String? _error;
-  bool _staging = false;
-  // 入池复制进度（新桥 taskId 轮询；老桥阻塞式无进度）
-  String? _stageName;
-  int _stageCopied = 0;
-  int _stageTotal = 0;
 
   @override
   void initState() {
@@ -135,62 +131,6 @@ class _PoolSheetState extends State<PoolSheet> {
       _pool = r;
       _loading = false;
     });
-  }
-
-  /// 添加文件：全盘选文件 → 复制入池。有会话工作区入工作区池，否则入全局池。
-  /// 新桥异步复制（taskId + 轮询进度条）；老桥阻塞到完成（转圈）。
-  Future<void> _addFile() async {
-    if (_staging) return;
-    final file = await WorkspacePicker.show(context, widget.client, pickFile: true);
-    if (file == null || file.isEmpty || !mounted) return;
-    setState(() {
-      _staging = true;
-      _stageName = null;
-      _stageCopied = 0;
-      _stageTotal = 0;
-    });
-    final hasWs = widget.workspaceRoot != null;
-    final out = await widget.client.dlStage(
-      file,
-      deviceId: widget.deviceId,
-      workspaceRoot: widget.workspaceRoot,
-      toWorkspace: hasWs,
-    );
-    if (!mounted) return;
-    if (out == null) {
-      setState(() => _staging = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('添加失败（复制未开始）')));
-      return;
-    }
-    final name = '${out['name']}';
-    final taskId = out['taskId'] is String ? out['taskId']! as String : '';
-    setState(() => _stageName = name);
-    String? stageError;
-    if (taskId.isNotEmpty) {
-      // 轮询复制进度直到完成（面板被关/重置时静默退出）
-      while (mounted && _staging) {
-        await Future.delayed(const Duration(milliseconds: 700));
-        if (!mounted || !_staging) return;
-        final p = await widget.client.dlStageProgress(taskId);
-        if (p == null) break; // 任务过期（>10min 清理）：按完成处理，池列表刷新兜底
-        setState(() {
-          _stageCopied = (p['copied'] as num?)?.toInt() ?? 0;
-          _stageTotal = (p['total'] as num?)?.toInt() ?? 0;
-        });
-        if (p['done'] == true) {
-          final err = '${p['error'] ?? ''}';
-          if (err.isNotEmpty) stageError = err;
-          break;
-        }
-      }
-    }
-    if (!mounted) return;
-    setState(() => _staging = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(stageError != null ? '添加失败：$stageError' : '已添加到下载池：$name'),
-    ));
-    if (stageError == null) await _load();
   }
 
   Future<void> _delete(Map<String, dynamic> f) async {
@@ -270,13 +210,6 @@ class _PoolSheetState extends State<PoolSheet> {
                   onPressed: _loading ? null : _load,
                 ),
                 IconButton(
-                  icon: _staging
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.add_to_photos_outlined),
-                  tooltip: '添加文件到下载池',
-                  onPressed: _staging ? null : _addFile,
-                ),
-                IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
@@ -289,38 +222,13 @@ class _PoolSheetState extends State<PoolSheet> {
               children: [
                 Expanded(
                   child: Text(
-                    '仅 .dsh-download 下载池内文件可下载；点「＋」从磁盘复制文件入池',
+                    '只读下载池：文件由桌面端放入 .dsh-download 目录，手机仅可下载/删除池内副本',
                     style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
                   ),
                 ),
               ],
             ),
           ),
-          // 入池复制进度（新桥）：文件名 + 已复制/总量
-          if (_staging)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  LinearProgressIndicator(
-                    value: _stageTotal > 0 ? _stageCopied / _stageTotal : null,
-                  ),
-                  if (_stageName != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        _stageTotal > 0
-                            ? '添加中：$_stageName（${_fmtSize(_stageCopied)} / ${_fmtSize(_stageTotal)}）'
-                            : '添加中：$_stageName…',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ),
-                ],
-              ),
-            ),
           const Divider(height: 8),
           Expanded(child: _buildBody(theme)),
         ],
@@ -349,7 +257,7 @@ class _PoolSheetState extends State<PoolSheet> {
       if (items.isEmpty)
         const Padding(
           padding: EdgeInsets.all(24),
-          child: Text('下载池为空。点右上角「＋」从磁盘选文件添加。', textAlign: TextAlign.center),
+          child: Text('下载池为空。在电脑上把文件放入 .dsh-download 目录后点右上角刷新。', textAlign: TextAlign.center),
         ),
     ];
     return ListView(padding: const EdgeInsets.only(bottom: 12), children: tiles);

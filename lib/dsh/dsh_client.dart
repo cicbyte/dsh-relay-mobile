@@ -98,15 +98,14 @@ class DshClient {
   }
 
   /// 列子目录（环回限定，经隧道）：{ ok, path, parent, dirs: [{path,label}] }。
-  /// [showHidden] 为 true 时含点开头目录。失败返回 null。
-  Future<Map<String, dynamic>?> workspaceList(String dir, {bool showHidden = false, bool withFiles = false}) async {
+  /// [showHidden] 为 true 时含点开头目录。只列目录（桥端不给全盘文件名枚举）。失败返回 null。
+  Future<Map<String, dynamic>?> workspaceList(String dir, {bool showHidden = false}) async {
     try {
       final q = Uri(
         path: '/mobile-bridge/workspace-list',
         queryParameters: {
           'path': dir,
           if (showHidden) 'hidden': '1',
-          if (withFiles) 'files': '1',
         },
       ).toString();
       final resp = await transport.request('GET', q);
@@ -195,55 +194,6 @@ class DshClient {
         queryParameters: {
           if (workspaceRoot != null && workspaceRoot.isNotEmpty) 'workspace': workspaceRoot,
         },
-      ).toString();
-      final resp = await transport.request('GET', q);
-      if (resp.status != 200 || resp.body.isEmpty) return null;
-      final j = jsonDecode(resp.body) as Map<String, dynamic>;
-      if (j['code'] == 200 && j['result'] is Map) {
-        return Map<String, dynamic>.from(j['result']);
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// 添加文件入下载池（复制，原文件保留）：返回 { taskId, name, path, size, mtime, pool }。
-  /// 新桥异步分块复制——立即返回 taskId，轮询 [dlStageProgress] 看进度；
-  /// 老桥（无 taskId 字段）阻塞到复制完成。失败返回 null。
-  /// [toWorkspace] 为 true 时入工作区池（需 [workspaceRoot]），否则入全局池。
-  Future<Map<String, dynamic>?> dlStage(String filePath,
-      {required String deviceId, String? workspaceRoot, required bool toWorkspace}) async {
-    try {
-      final resp = await transport.request(
-        'POST',
-        '/mobile-bridge/dl-stage',
-        headers: {'content-type': 'application/json; charset=utf-8', 'x-device-id': deviceId},
-        body: jsonEncode({
-          'path': filePath,
-          'deviceId': deviceId,
-          'target': toWorkspace ? 'workspace' : 'global',
-          if (workspaceRoot != null && workspaceRoot.isNotEmpty) 'workspaceRoot': workspaceRoot,
-        }),
-      );
-      if (resp.status != 200 || resp.body.isEmpty) return null;
-      final j = jsonDecode(resp.body) as Map<String, dynamic>;
-      if (j['code'] == 200 && j['result'] is Map) {
-        return Map<String, dynamic>.from(j['result']);
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// 入池复制进度（新桥异步复制）：{ copied, total, done, error, name }。
-  /// 任务不存在/老桥返回 null（调用方按一次性完成处理）。
-  Future<Map<String, dynamic>?> dlStageProgress(String taskId) async {
-    try {
-      final q = Uri(
-        path: '/mobile-bridge/dl-stage-progress',
-        queryParameters: {'id': taskId},
       ).toString();
       final resp = await transport.request('GET', q);
       if (resp.status != 200 || resp.body.isEmpty) return null;
