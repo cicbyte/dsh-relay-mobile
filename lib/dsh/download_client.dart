@@ -25,12 +25,15 @@ class DownloadClient {
   /// [onProgress](received, total)：total 未知时为 -1。返回是否完整下载。
   /// [streamFactory]：隧道流式字节流工厂（RelayTransport.streamRequest）；
   /// 为空则走直连 HttpClient。
+  /// [cancelled]：取消探测（循环内轮询）；取消/失败都返回 false，
+  /// 已写部分保留在 [destFile] 供下次断点续传——由调用方区分取消与失败。
   Future<bool> fetchToFile(
     String downloadId,
     String deviceId,
     File destFile, {
     void Function(int received, int total)? onProgress,
     StreamFactory? streamFactory,
+    bool Function()? cancelled,
   }) async {
     // 隧道流式：Range 断点续传（本地 offset → range 头 → 206 追加写）。
     // meta 帧先于任何数据块到达：status 决定写模式——206 追加 / 200 覆盖 /
@@ -51,6 +54,7 @@ class DownloadClient {
         if (stream == null) return false;
         int received = 0;
         await for (final chunk in stream) {
+          if (cancelled?.call() == true) return false; // 取消：保留断点
           if (failed || status == 416) break; // 空/立即结束，不写盘
           if (sink == null) {
             // 206=服务端从断点续（追加）；200/无 meta（老桥）=从头（覆盖，防错位）
@@ -99,6 +103,7 @@ class DownloadClient {
       final total = resp.contentLength < 0 ? -1 : resp.contentLength + offset;
       int received = offset;
       await for (final chunk in resp) {
+        if (cancelled?.call() == true) return false; // 取消：保留断点
         sink.add(chunk);
         received += chunk.length;
         onProgress?.call(received, total);

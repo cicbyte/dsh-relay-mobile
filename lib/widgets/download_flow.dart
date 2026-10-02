@@ -367,6 +367,7 @@ class _DownloadSheetState extends State<_DownloadSheet> {
   bool _downloadOk = false; // 下载成功后才给「保存到系统下载」入口
   bool _savingDl = false;
   String? _savedTo;
+  bool _cancelled = false; // 用户取消（区别于失败：已下载部分保留可续传）
 
   Future<void> _download() async {
     setState(() {
@@ -375,6 +376,7 @@ class _DownloadSheetState extends State<_DownloadSheet> {
       _done = null;
       _downloadOk = false;
       _savedTo = null;
+      _cancelled = false;
     });
     try {
       // 落盘 app 私有目录（应用文档目录）
@@ -392,6 +394,7 @@ class _DownloadSheetState extends State<_DownloadSheet> {
           offset: offset,
           onMeta: onMeta,
         ),
+        cancelled: () => _cancelled,
         onProgress: (received, t) {
           if (!mounted) return;
           setState(() => _progress = t > 0 ? received / t : null);
@@ -401,13 +404,15 @@ class _DownloadSheetState extends State<_DownloadSheet> {
       setState(() {
         _downloading = false;
         _downloadOk = ok;
-        _done = ok ? '已保存到 ${dest.path}' : '下载失败';
+        _done = _cancelled
+            ? '已取消（已下载部分保留，可断点续传）'
+            : (ok ? '已保存到 ${dest.path}' : '下载失败');
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _downloading = false;
-        _done = '下载失败：$e';
+        _done = _cancelled ? '已取消（已下载部分保留，可断点续传）' : '下载失败：$e';
       });
     }
   }
@@ -495,11 +500,14 @@ class _DownloadSheetState extends State<_DownloadSheet> {
                 children: [
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: _downloading ? null : _download,
+                      // 下载中变身「取消」（保留断点）；空闲时开始/续传下载
+                      onPressed: _downloading
+                          ? () => setState(() => _cancelled = true)
+                          : _download,
                       icon: _downloading
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(Icons.download),
-                      label: Text(_downloading ? '下载中…' : '下载'),
+                      label: Text(_downloading ? '取消' : '下载'),
                     ),
                   ),
                   const SizedBox(width: 12),
