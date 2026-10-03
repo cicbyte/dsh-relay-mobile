@@ -119,9 +119,10 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         // 带 phase 的全量快照、不是 clear——漏判 phase 曾致已完成目标
         // 在桌面消失后手机仍挂着（「桌面没了手机还显示」）。
         _goalObjective =
-            (rec.data['operation'] == 'clear' || '${goal['phase']}' == 'complete')
-                ? ''
-                : '${goal['objective'] ?? ''}';
+            (rec.data['operation'] == 'clear' ||
+                '${goal['phase']}' == 'complete')
+            ? ''
+            : '${goal['objective'] ?? ''}';
     }
   }
 
@@ -161,13 +162,15 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     return _fmtDuration(DateTime.now().millisecondsSinceEpoch - ms);
   }
 
-  List<String> get _modes => widget.summary.parentSessionId == null ? ['one-shot'] : ['one-shot', 'continuable'];
+  List<String> get _modes => widget.summary.parentSessionId == null
+      ? ['one-shot']
+      : ['one-shot', 'continuable'];
 
   Map<String, dynamic> get _address => sessionAddress(
-        sessionId: widget.summary.sessionId,
-        parentSessionId: widget.summary.parentSessionId,
-        mode: _modes[_modeIdx.clamp(0, _modes.length - 1)],
-      );
+    sessionId: widget.summary.sessionId,
+    parentSessionId: widget.summary.parentSessionId,
+    mode: _modes[_modeIdx.clamp(0, _modes.length - 1)],
+  );
 
   @override
   void initState() {
@@ -233,29 +236,43 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     _gotFrame = false;
     _openControl();
     _sub?.cancel();
-    _sub = _mux.open('session/follow', {
-      'request': {
-        'address': _address,
-        // 快照尾窗不宜过大：大 JSON 解析会阻塞主 isolate，延迟自动 Pong（服务端 2 次未应答即断线）
-        'maxMessages': 50,
-      },
-    }).listen(_onFrame, onError: (Object e) {
-      // subagent 场景：mode 不匹配时换下一个再试（如 one-shot → continuable）
-      final msg = '$e';
-      final canRetry = !_gotFrame && _modeIdx < _modes.length - 1;
-      if (canRetry && (msg.contains('agent-busy') || msg.contains('mode') || msg.contains('address'))) {
-        setState(() => _modeIdx++);
-        _openFollow();
-        return;
-      }
-      if (mounted) {
-        // 断连由 DshMux 持续自动重连兜底：提示恢复中，而非要求手动操作
-        setState(() => _error = msg.contains('mux/disconnected') ? '连接已断开，自动重连中…' : msg);
-      }
-    }, onDone: () {
-      // 自动重连进行中（DshMux 持续重试）：提示而非要求手动操作
-      if (mounted && _error == null) setState(() => _error = '连接已断开，自动重连中…');
-    });
+    _sub = _mux
+        .open('session/follow', {
+          'request': {
+            'address': _address,
+            // 快照尾窗不宜过大：大 JSON 解析会阻塞主 isolate，延迟自动 Pong（服务端 2 次未应答即断线）
+            'maxMessages': 50,
+          },
+        })
+        .listen(
+          _onFrame,
+          onError: (Object e) {
+            // subagent 场景：mode 不匹配时换下一个再试（如 one-shot → continuable）
+            final msg = '$e';
+            final canRetry = !_gotFrame && _modeIdx < _modes.length - 1;
+            if (canRetry &&
+                (msg.contains('agent-busy') ||
+                    msg.contains('mode') ||
+                    msg.contains('address'))) {
+              setState(() => _modeIdx++);
+              _openFollow();
+              return;
+            }
+            if (mounted) {
+              // 断连由 DshMux 持续自动重连兜底：提示恢复中，而非要求手动操作
+              setState(
+                () => _error = msg.contains('mux/disconnected')
+                    ? '连接已断开，自动重连中…'
+                    : msg,
+              );
+            }
+          },
+          onDone: () {
+            // 自动重连进行中（DshMux 持续重试）：提示而非要求手动操作
+            if (mounted && _error == null)
+              setState(() => _error = '连接已断开，自动重连中…');
+          },
+        );
   }
 
   void _onFrame(Map<String, dynamic> frame) {
@@ -304,7 +321,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     final finished = _wasRunning && !running;
     _wasRunning = running;
     if (!finished || frame['type'] != 'event') return;
-    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) return;
+    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed)
+      return;
     final title = _displayTitle(_records.values.toList());
     notifyEvent('DSH 回答完成', title);
   }
@@ -384,7 +402,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         _updateMinSeq();
       });
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('翻页失败：$e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('翻页失败：$e')));
     }
   }
 
@@ -424,7 +444,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       _inputCtrl.clear();
       widget.onSessionEnded?.call();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('发送失败：$e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('发送失败：$e')));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -445,9 +467,10 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       final kind = '${result['kind'] ?? ''}';
       final text = '${result['text'] ?? ''}';
       if (kind == 'error') {
-        final unknown = RegExp(r'not found|unknown|未知|没有找到|未注册',
-                caseSensitive: false)
-            .hasMatch(text);
+        final unknown = RegExp(
+          r'not found|unknown|未知|没有找到|未注册',
+          caseSensitive: false,
+        ).hasMatch(text);
         if (unknown) {
           // 不是命令（例如粘贴的 /path/...）：按普通消息发送。
           setState(() => _sending = false);
@@ -490,7 +513,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       final text = '${result['text'] ?? ''}';
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(text.isEmpty ? '$line 已执行' : text)));
+          SnackBar(content: Text(text.isEmpty ? '$line 已执行' : text)),
+        );
       }
       widget.onSessionEnded?.call();
     } catch (e) {
@@ -543,12 +567,15 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                 f['uploading'] == true
                     ? Icons.cloud_upload_outlined
                     : f['isImage'] == true
-                        ? Icons.image_outlined
-                        : Icons.insert_drive_file_outlined,
+                    ? Icons.image_outlined
+                    : Icons.insert_drive_file_outlined,
                 size: 18,
               ),
-              label: Text('${f['name']}',
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              label: Text(
+                '${f['name']}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               deleteIcon: const Icon(Icons.close, size: 16),
               onDeleted: () => setState(() => _draftFiles.remove(f)),
             ),
@@ -561,16 +588,20 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   Widget _goalDock() {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Row(children: [
-        Icon(Icons.flag_outlined, size: 14, color: Acc.pink(context)),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(_goalObjective,
+      child: Row(
+        children: [
+          Icon(Icons.flag_outlined, size: 14, color: Acc.pink(context)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              _goalObjective,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall),
-        ),
-      ]),
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -578,29 +609,37 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   /// `queue` 增量帧（items: {id, placement, rpcId?, message:{id, content}}）。
   void _openControl() {
     _controlSub?.cancel();
-    _controlSub = _mux.open('session/control', {}).listen((frame) {
-      if (!mounted) return;
-      final type = '${frame['type']}';
-      setState(() {
-        if (type == 'baseline') {
-          final queues = Map<String, dynamic>.from(
-              (frame['value'] as Map? ?? const {})['queues'] as Map? ?? {});
-          _controlQueues.clear();
-          for (final e in queues.entries) {
-            _controlQueues[e.key] = (e.value as List? ?? [])
-                .whereType<Map>()
-                .map((m) => Map<String, dynamic>.from(m))
-                .toList();
-          }
-        } else if (type == 'queue') {
-          _controlQueues['${frame['sessionId']}'] =
-              (frame['items'] as List? ?? [])
-                  .whereType<Map>()
-                  .map((m) => Map<String, dynamic>.from(m))
-                  .toList();
-        }
-      });
-    }, onError: (Object _) {/* 断线随 mux 重连重开 */});
+    _controlSub = _mux
+        .open('session/control', {})
+        .listen(
+          (frame) {
+            if (!mounted) return;
+            final type = '${frame['type']}';
+            setState(() {
+              if (type == 'baseline') {
+                final queues = Map<String, dynamic>.from(
+                  (frame['value'] as Map? ?? const {})['queues'] as Map? ?? {},
+                );
+                _controlQueues.clear();
+                for (final e in queues.entries) {
+                  _controlQueues[e.key] = (e.value as List? ?? [])
+                      .whereType<Map>()
+                      .map((m) => Map<String, dynamic>.from(m))
+                      .toList();
+                }
+              } else if (type == 'queue') {
+                _controlQueues['${frame['sessionId']}'] =
+                    (frame['items'] as List? ?? [])
+                        .whereType<Map>()
+                        .map((m) => Map<String, dynamic>.from(m))
+                        .toList();
+              }
+            });
+          },
+          onError: (Object _) {
+            /* 断线随 mux 重连重开 */
+          },
+        );
   }
 
   /// 当前会话的队列行。与桌面 QueueDock 严格同源同滤：只显示
@@ -622,37 +661,47 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         border: Border.all(color: scheme.outlineVariant),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        InkWell(
-          onTap: () => setState(() => _queueCollapsed = !_queueCollapsed),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-            child: Row(children: [
-              Icon(Icons.queue_outlined, size: 16, color: scheme.primary),
-              const SizedBox(width: 6),
-              Text('队列 · ${rows.length}',
-                  style: TextStyle(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _queueCollapsed = !_queueCollapsed),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.queue_outlined, size: 16, color: scheme.primary),
+                  const SizedBox(width: 6),
+                  Text(
+                    '队列 · ${rows.length}',
+                    style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: scheme.primary)),
-              const Spacer(),
-              TextButton(
-                onPressed: _queueBusy.isEmpty ? _steerAll : null,
-                style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 28)),
-                child: const Text('全部立即', style: TextStyle(fontSize: 12)),
+                      color: scheme.primary,
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: _queueBusy.isEmpty ? _steerAll : null,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 28),
+                    ),
+                    child: const Text('全部立即', style: TextStyle(fontSize: 12)),
+                  ),
+                  Icon(
+                    showList ? Icons.expand_less : Icons.expand_more,
+                    size: 18,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ],
               ),
-              Icon(
-                  showList ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: scheme.onSurfaceVariant),
-            ]),
+            ),
           ),
-        ),
-        if (showList)
-          for (var i = 0; i < rows.length; i++) _queueRow(i, rows[i], scheme),
-      ]),
+          if (showList)
+            for (var i = 0; i < rows.length; i++) _queueRow(i, rows[i], scheme),
+        ],
+      ),
     );
   }
 
@@ -667,8 +716,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         .trim();
     final files = content
         .where((b) => '${b['type']}' == 'file' || '${b['type']}' == 'image')
-        .map((b) =>
-            '${(b['attachment'] as Map? ?? const {})['name'] ?? "附件"}')
+        .map((b) => '${(b['attachment'] as Map? ?? const {})['name'] ?? "附件"}')
         .toList();
     final placement = (row['placement'] ?? 'queued').toString();
     final placeLabel = switch (placement) {
@@ -680,78 +728,94 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     final busy = _queueBusy == itemId;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-      child: Row(children: [
-        Container(
-          width: 20,
-          height: 20,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: scheme.outlineVariant),
+      child: Row(
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            child: Text(
+              '${index + 1}',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
           ),
-          child: Text('${index + 1}',
-              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (placeLabel.isNotEmpty)
-                Text(placeLabel,
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (placeLabel.isNotEmpty)
+                  Text(
+                    placeLabel,
                     style: TextStyle(
-                        fontSize: 10,
-                        color: Acc.amber(context),
-                        fontWeight: FontWeight.w600)),
-              Text(text.isEmpty ? '（附件消息）' : text,
+                      fontSize: 10,
+                      color: Acc.amber(context),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                Text(
+                  text.isEmpty ? '（附件消息）' : text,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12)),
-              if (files.isNotEmpty)
-                Text('📎 ${files.join('、')}',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                if (files.isNotEmpty)
+                  Text(
+                    '📎 ${files.join('、')}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: 10, color: scheme.onSurfaceVariant)),
-            ],
+                      fontSize: 10,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
           ),
-        ),
-        IconButton(
-          tooltip: '立即执行',
-          iconSize: 18,
-          padding: const EdgeInsets.all(4),
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          onPressed: busy
-              ? null
-              : () => _queueAction(row, {'kind': 'steer'}, fail: '立即执行失败'),
-          icon: const Icon(Icons.bolt_outlined),
-        ),
-        IconButton(
-          tooltip: '撤回',
-          iconSize: 18,
-          padding: const EdgeInsets.all(4),
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          onPressed: busy
-              ? null
-              : () => _queueAction(row, {'kind': 'remove'}, fail: '撤回失败'),
-          icon: const Icon(Icons.close_outlined),
-        ),
-        IconButton(
-          tooltip: '改写',
-          iconSize: 18,
-          padding: const EdgeInsets.all(4),
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          onPressed: busy ? null : () => _queueEdit(row),
-          icon: const Icon(Icons.edit_outlined),
-        ),
-      ]),
+          IconButton(
+            tooltip: '立即执行',
+            iconSize: 18,
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            onPressed: busy
+                ? null
+                : () => _queueAction(row, {'kind': 'steer'}, fail: '立即执行失败'),
+            icon: const Icon(Icons.bolt_outlined),
+          ),
+          IconButton(
+            tooltip: '撤回',
+            iconSize: 18,
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            onPressed: busy
+                ? null
+                : () => _queueAction(row, {'kind': 'remove'}, fail: '撤回失败'),
+            icon: const Icon(Icons.close_outlined),
+          ),
+          IconButton(
+            tooltip: '改写',
+            iconSize: 18,
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            onPressed: busy ? null : () => _queueEdit(row),
+            icon: const Icon(Icons.edit_outlined),
+          ),
+        ],
+      ),
     );
   }
 
   /// 队列动作：session/updateQueue {request:{sessionId,itemId,action}}。
   /// 控制流的 queue 帧会推回权威状态，本地不做乐观更新。
-  Future<void> _queueAction(Map<String, dynamic> row, Map<String, dynamic> action,
-      {String fail = '队列操作失败'}) async {
+  Future<void> _queueAction(
+    Map<String, dynamic> row,
+    Map<String, dynamic> action, {
+    String fail = '队列操作失败',
+  }) async {
     final msg = row['message'] as Map?;
     final itemId = '${row['id'] ?? msg?['id'] ?? ''}';
     if (itemId.isEmpty) return;
@@ -786,15 +850,16 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     await _queueAction(row, {
       'kind': 'edit',
       'content': [
-        {'type': 'text', 'text': newText.trim()}
+        {'type': 'text', 'text': newText.trim()},
       ],
     }, fail: '改写失败');
   }
 
   /// 全部立即执行：FIFO 逐条 steer（对齐桌面 QueueDock Steer all）。
   Future<void> _steerAll() async {
-    final rows =
-        _queueRows.where((r) => '${r['placement'] ?? 'queued'}' == 'queued').toList();
+    final rows = _queueRows
+        .where((r) => '${r['placement'] ?? 'queued'}' == 'queued')
+        .toList();
     for (final row in rows) {
       await _queueAction(row, {'kind': 'steer'}, fail: '立即执行失败');
     }
@@ -880,13 +945,19 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             ListTile(
               dense: true,
               leading: Icon(Icons.terminal, size: 18, color: scheme.primary),
-              title: Text('/${c['name'] ?? ''}',
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600)),
-              subtitle: Text('${c['description'] ?? ''}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11)),
+              title: Text(
+                '/${c['name'] ?? ''}',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                '${c['description'] ?? ''}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11),
+              ),
               onTap: () => _pickCommand(c),
             ),
         ],
@@ -899,8 +970,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     final name = '${c['name'] ?? ''}';
     final hasInput = c['input'] is Map;
     _inputCtrl.text = hasInput ? '/$name ' : '/$name';
-    _inputCtrl.selection =
-        TextSelection.collapsed(offset: _inputCtrl.text.length);
+    _inputCtrl.selection = TextSelection.collapsed(
+      offset: _inputCtrl.text.length,
+    );
     setState(() {});
   }
 
@@ -911,32 +983,38 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       context: context,
       isScrollControlled: true,
       builder: (ctx) => _ReferenceSheet(
-          client: widget.client, sessionId: widget.summary.sessionId),
+        client: widget.client,
+        sessionId: widget.summary.sessionId,
+      ),
     );
     if (picked == null || picked.isEmpty || !mounted) return;
     final ctrl = _inputCtrl;
     final sel = ctrl.selection;
     final text = ctrl.text;
-    final insertAt =
-        (sel.isValid ? sel.baseOffset : text.length).clamp(0, text.length);
+    final insertAt = (sel.isValid ? sel.baseOffset : text.length).clamp(
+      0,
+      text.length,
+    );
     final head = text.substring(0, insertAt);
     final tail = text.substring(insertAt);
-    final spacer =
-        head.isEmpty || head.endsWith(' ') || head.endsWith('\n') ? '' : ' ';
+    final spacer = head.isEmpty || head.endsWith(' ') || head.endsWith('\n')
+        ? ''
+        : ' ';
     ctrl.text = '$head$spacer$picked $tail';
     ctrl.selection = TextSelection.collapsed(
-        offset: head.length + spacer.length + picked.length + 1);
+      offset: head.length + spacer.length + picked.length + 1,
+    );
     setState(() {});
   }
 
   /// 权限预设显示名（图标 tooltip 与菜单共用）。
   String _permissionLabel(String preset) => switch (preset) {
-        'read-only' => '仅可查看',
-        'workspace-write' => '工作区内修改',
-        'danger-full-access' => '完全权限',
-        '' => '权限',
-        _ => preset,
-      };
+    'read-only' => '仅可查看',
+    'workspace-write' => '工作区内修改',
+    'danger-full-access' => '完全权限',
+    '' => '权限',
+    _ => preset,
+  };
 
   /// 输入卡内的图标+文字小药丸（参考 DeepSeek「深度思考/智能搜索」样式：
   /// 默认描边灰、激活主题色底；长标签（模型名）截断）。
@@ -957,16 +1035,22 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           borderRadius: BorderRadius.circular(18),
           color: active ? scheme.primaryContainer : null,
           border: Border.all(
-              color: active ? scheme.primary : scheme.outlineVariant),
+            color: active ? scheme.primary : scheme.outlineVariant,
+          ),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 15, color: fg),
-          const SizedBox(width: 4),
-          Text(label,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: fg),
+            const SizedBox(width: 4),
+            Text(
+              label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: fg)),
-        ]),
+              style: TextStyle(fontSize: 12, color: fg),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -995,40 +1079,57 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
 
   Future<void> _startDownload() async {
     if (widget.deviceId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('未配对设备，无法生成绑定下载链接')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('未配对设备，无法生成绑定下载链接')));
       return;
     }
     // 工作区池跟随会话 cwd；无 cwd 的会话（如部分子代理）只有全局池
-    await DownloadFlow.start(context, widget.client, widget.deviceId,
-        workspaceRoot: widget.summary.cwd);
+    await DownloadFlow.start(
+      context,
+      widget.client,
+      widget.deviceId,
+      workspaceRoot: widget.summary.cwd,
+    );
   }
 
   /// 选附件：图片留 base64 直传；其他文件即刻上传拿 receiptId。
   Future<void> _pickFiles() async {
-    final result =
-        await FilePicker.platform.pickFiles(allowMultiple: true, withData: true);
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+    );
     if (result == null) return;
     for (final f in result.files) {
       final bytes = f.bytes;
       if (bytes == null) continue;
       final name = f.name;
       final lower = name.toLowerCase();
-      final isImage = lower.endsWith('.png') ||
+      final isImage =
+          lower.endsWith('.png') ||
           lower.endsWith('.jpg') ||
           lower.endsWith('.jpeg') ||
           lower.endsWith('.webp') ||
           lower.endsWith('.gif');
       if (isImage) {
-        setState(() =>
-            _draftFiles.add({'name': name, 'bytes': bytes, 'isImage': true}));
+        setState(
+          () =>
+              _draftFiles.add({'name': name, 'bytes': bytes, 'isImage': true}),
+        );
       } else {
-        setState(() => _draftFiles
-            .add({'name': name, 'bytes': bytes, 'isImage': false, 'uploading': true}));
+        setState(
+          () => _draftFiles.add({
+            'name': name,
+            'bytes': bytes,
+            'isImage': false,
+            'uploading': true,
+          }),
+        );
         try {
-          final v = await widget.client
-              .uploadFile(widget.summary.sessionId, name, bytes);
+          final v = await widget.client.uploadFile(
+            widget.summary.sessionId,
+            name,
+            bytes,
+          );
           if (!mounted) return;
           setState(() {
             for (final e in _draftFiles) {
@@ -1040,7 +1141,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           });
         } catch (e) {
           if (!mounted) return;
-          setState(() => _draftFiles.removeWhere((e) => identical(e['bytes'], bytes)));
+          setState(
+            () => _draftFiles.removeWhere((e) => identical(e['bytes'], bytes)),
+          );
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text('上传失败：$name')));
         }
@@ -1058,19 +1161,26 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     final picked = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const ListTile(
-              title: Text('权限预设', style: TextStyle(fontWeight: FontWeight.bold))),
-          for (final (id, label, icon) in options)
-            ListTile(
-              leading: Icon(icon),
-              title: Text(label),
-              trailing: _permissionPreset == id
-                  ? const Icon(Icons.check, size: 18)
-                  : null,
-              onTap: () => Navigator.of(ctx).pop(id),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                '权限预设',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
-        ]),
+            for (final (id, label, icon) in options)
+              ListTile(
+                leading: Icon(icon),
+                title: Text(label),
+                trailing: _permissionPreset == id
+                    ? const Icon(Icons.check, size: 18)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(id),
+              ),
+          ],
+        ),
       ),
     );
     if (picked == null || !mounted) return;
@@ -1080,14 +1190,17 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         builder: (ctx) => AlertDialog(
           title: const Text('确认启用完全权限？'),
           content: const Text(
-              '启用完全权限后，智能体将减少确认步骤，并且可以直接执行更多操作，包括敏感操作、文件修改或外部命令。仅建议在你信任当前任务时使用。'),
+            '启用完全权限后，智能体将减少确认步骤，并且可以直接执行更多操作，包括敏感操作、文件修改或外部命令。仅建议在你信任当前任务时使用。',
+          ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('取消')),
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消'),
+            ),
             FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('启用完全权限')),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('启用完全权限'),
+            ),
           ],
         ),
       );
@@ -1120,15 +1233,21 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             shrinkWrap: true,
             children: [
               const ListTile(
-                  title: Text('选择模型',
-                      style: TextStyle(fontWeight: FontWeight.bold))),
+                title: Text(
+                  '选择模型',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
               for (final g in groups) ...[
                 ListTile(
                   dense: true,
-                  title: Text('${g['name'] ?? g['id'] ?? ''}',
-                      style: TextStyle(
-                          color: Theme.of(ctx).colorScheme.primary,
-                          fontSize: 13)),
+                  title: Text(
+                    '${g['name'] ?? g['id'] ?? ''}',
+                    style: TextStyle(
+                      color: Theme.of(ctx).colorScheme.primary,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
                 for (final m in (g['models'] as List? ?? []).whereType<Map>())
                   ListTile(
@@ -1141,8 +1260,11 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                     title: Text('${m['name'] ?? m['id'] ?? ''}'),
                     subtitle: m['description'] == null
                         ? null
-                        : Text('${m['description']}',
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        : Text(
+                            '${m['description']}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                     onTap: () {
                       Navigator.of(ctx).pop();
                       _setModel('${g['id'] ?? ''}', '${m['id'] ?? ''}');
@@ -1163,7 +1285,11 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
 
   Future<void> _setModel(String provider, String model) async {
     try {
-      await widget.client.selectModel(widget.summary.sessionId, provider, model);
+      await widget.client.selectModel(
+        widget.summary.sessionId,
+        provider,
+        model,
+      );
       if (!mounted) return;
       setState(() {
         _modelName = model;
@@ -1184,15 +1310,15 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   Future<void> _sendWithFiles(String text) async {
     if (widget.summary.parentSessionId != null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('子agent 暂不支持附件发送')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('子agent 暂不支持附件发送')));
       }
       return;
     }
     if (_draftFiles.any((f) => f['uploading'] == true)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('附件上传中，请稍候发送')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('附件上传中，请稍候发送')));
       }
       return;
     }
@@ -1210,14 +1336,13 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
               'name': f['name'],
             }
           else
-            {
-              'type': 'file',
-              'receiptId': f['receiptId'],
-              'name': f['name'],
-            },
+            {'type': 'file', 'receiptId': f['receiptId'], 'name': f['name']},
       ];
-      await widget.client.sessionPromptBlocks(widget.summary.sessionId, content,
-          clientTimeZone: tz);
+      await widget.client.sessionPromptBlocks(
+        widget.summary.sessionId,
+        content,
+        clientTimeZone: tz,
+      );
       if (!mounted) return;
       setState(() => _draftFiles.clear());
       _inputCtrl.clear();
@@ -1266,7 +1391,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         await widget.client.sessionCancel(widget.summary.sessionId);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('取消失败：$e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('取消失败：$e')));
     }
   }
 
@@ -1283,7 +1410,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       }
       return;
     }
-    final entries = (catalog['entries'] as List? ?? []).whereType<Map>().toList();
+    final entries = (catalog['entries'] as List? ?? [])
+        .whereType<Map>()
+        .toList();
     if (!mounted) return;
     showModalBottomSheet<void>(
       context: context,
@@ -1315,7 +1444,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                             : Icons.warning_amber_outlined,
                         size: 18,
                         color: isChild
-                            ? (running ? Acc.green(context) : scheme.onSurfaceVariant)
+                            ? (running
+                                  ? Acc.green(context)
+                                  : scheme.onSurfaceVariant)
                             : scheme.error,
                       ),
                       title: Text(
@@ -1326,7 +1457,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                       subtitle: Text(
                         isChild
                             ? '$mode · ${running ? '运行中' : '空闲'}'
-                                '${e['hasChildren'] == true ? ' · 含子级' : ''}'
+                                  '${e['hasChildren'] == true ? ' · 含子级' : ''}'
                             : '${e['reason'] ?? ''} · $id',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1335,20 +1466,22 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                       onTap: isChild
                           ? () {
                               Navigator.of(sheetCtx).pop();
-                              Navigator.of(context).push(MaterialPageRoute(
-                                builder: (_) => SessionPage(
-                                  client: widget.client,
-                                  summary: SessionSummary(
-                                    sessionId: id,
-                                    title: label.isEmpty ? id : label,
-                                    running: running,
-                                    blank: false,
-                                    parentSessionId: parent,
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => SessionPage(
+                                    client: widget.client,
+                                    summary: SessionSummary(
+                                      sessionId: id,
+                                      title: label.isEmpty ? id : label,
+                                      running: running,
+                                      blank: false,
+                                      parentSessionId: parent,
+                                    ),
+                                    onOpenDrawer: () {},
+                                    onSessionEnded: widget.onSessionEnded,
                                   ),
-                                  onOpenDrawer: () {},
-                                  onSessionEnded: widget.onSessionEnded,
                                 ),
-                              ));
+                              );
                             }
                           : null,
                     );
@@ -1361,13 +1494,15 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
 
   // ---------- 渲染 ----------
 
-  List<WireRecord> get _sorted => (_records.values.toList()..sort((a, b) => a.seq.compareTo(b.seq)));
+  List<WireRecord> get _sorted =>
+      (_records.values.toList()..sort((a, b) => a.seq.compareTo(b.seq)));
 
   String _contentText(dynamic content) {
     if (content is! List) return '';
     final parts = <String>[];
     for (final b in content) {
-      if (b is Map && b['type'] == 'text' && b['text'] is String) parts.add(b['text'] as String);
+      if (b is Map && b['type'] == 'text' && b['text'] is String)
+        parts.add(b['text'] as String);
     }
     return parts.join('\n');
   }
@@ -1385,13 +1520,23 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         case 'image':
           out.add(_imageBlock(b));
         case 'file':
-          out.add(Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.attach_file, size: 15),
-              Flexible(child: Text('${b['name'] ?? 'file'}', overflow: TextOverflow.ellipsis)),
-            ]),
-          ));
+          out.add(
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.attach_file, size: 15),
+                  Flexible(
+                    child: Text(
+                      '${b['name'] ?? 'file'}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
         default:
           break;
       }
@@ -1412,7 +1557,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             errorBuilder: (_, __, ___) => const Text('[图片无法解码]'),
           ),
         );
-      } catch (_) {/* fallthrough */}
+      } catch (_) {
+        /* fallthrough */
+      }
     }
     return const Text('[图片]');
   }
@@ -1436,36 +1583,50 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Icon(mine ? Icons.person_outline : Icons.auto_awesome,
+          Row(
+            children: [
+              Icon(
+                mine ? Icons.person_outline : Icons.auto_awesome,
                 size: 13,
                 color: mine
                     ? theme.colorScheme.primary
-                    : theme.colorScheme.onSurfaceVariant),
-            const SizedBox(width: 5),
-            Text(label, style: theme.textTheme.labelSmall),
-            const Spacer(),
-            if (meta.isNotEmpty) ...[
-              Text(meta,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant
-                          .withValues(alpha: 0.7))),
-              const SizedBox(width: 8),
-            ],
-            if (copyText != null && copyText.trim().isNotEmpty)
-              InkWell(
-                onTap: () async {
-                  await Clipboard.setData(ClipboardData(text: copyText));
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('已复制'),
-                        duration: Duration(seconds: 1)));
-                  }
-                },
-                child: Icon(Icons.copy,
-                    size: 12, color: theme.colorScheme.onSurfaceVariant),
+                    : theme.colorScheme.onSurfaceVariant,
               ),
-          ]),
+              const SizedBox(width: 5),
+              Text(label, style: theme.textTheme.labelSmall),
+              const Spacer(),
+              if (meta.isNotEmpty) ...[
+                Text(
+                  meta,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.7,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              if (copyText != null && copyText.trim().isNotEmpty)
+                InkWell(
+                  onTap: () async {
+                    await Clipboard.setData(ClipboardData(text: copyText));
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('已复制'),
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                    }
+                  },
+                  child: Icon(
+                    Icons.copy,
+                    size: 12,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 5),
           if (body.isEmpty)
             const Text('(空)')
@@ -1486,7 +1647,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     final src = Map<String, dynamic>.from(msg['source'] as Map? ?? {});
     if (src['callId'] != null) return '${src['callId']}';
     for (final b in msg['content'] as List? ?? []) {
-      if (b is Map && b['type'] == 'tool-result' && b['callId'] != null) return '${b['callId']}';
+      if (b is Map && b['type'] == 'tool-result' && b['callId'] != null)
+        return '${b['callId']}';
     }
     return '${r.data['callId'] ?? r.seq}';
   }
@@ -1512,11 +1674,18 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     for (final r in records) {
       switch (r.type) {
         case 'tool/call':
-          final e = tools['${r.data['callId'] ?? r.seq}'] ?? newEntry('${r.data['callId'] ?? r.seq}');
-          e.setCall('${r.data['name'] ?? 'tool'}', '${r.data['arguments'] ?? ''}');
+          final e =
+              tools['${r.data['callId'] ?? r.seq}'] ??
+              newEntry('${r.data['callId'] ?? r.seq}');
+          e.setCall(
+            '${r.data['name'] ?? 'tool'}',
+            '${r.data['arguments'] ?? ''}',
+          );
           e.callMs ??= r.time;
         case 'tool/result':
-          final msg = Map<String, dynamic>.from(r.data['message'] as Map? ?? {});
+          final msg = Map<String, dynamic>.from(
+            r.data['message'] as Map? ?? {},
+          );
           var body = '';
           var isError = r.data['error'] != null;
           for (final b in msg['content'] as List? ?? []) {
@@ -1574,7 +1743,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       } else if (isHuman) {
         autoTurn += 1;
         // 轮号对齐：turn/start 已预置的空轮（有分界未有提示词）由紧随的提问继承
-        final reuse = curTurn != 0 &&
+        final reuse =
+            curTurn != 0 &&
             (prompts[curTurn] ?? '').isEmpty &&
             turnStartIdx.containsKey(curTurn);
         curTurn = reuse ? curTurn : autoTurn;
@@ -1587,15 +1757,19 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           if (src['kind'] != null && src['kind'] != 'user') {
             out.add(_injectionTile(r, src));
           } else {
-            out.add(_messageBubble(
-              label: '你',
-              body: _blockWidgets(r.data['content']),
-              time: r.time,
-              copyText: _contentText(r.data['content']),
-            ));
+            out.add(
+              _messageBubble(
+                label: '你',
+                body: _blockWidgets(r.data['content']),
+                time: r.time,
+                copyText: _contentText(r.data['content']),
+              ),
+            );
           }
         case 'assistant/message':
-          final msg = Map<String, dynamic>.from(r.data['message'] as Map? ?? {});
+          final msg = Map<String, dynamic>.from(
+            r.data['message'] as Map? ?? {},
+          );
           final body = <Widget>[];
           final plain = <String>[];
           for (final b in msg['content'] as List? ?? []) {
@@ -1620,26 +1794,33 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           }
           if (body.isNotEmpty) {
             final u = Map<String, dynamic>.from(r.data['usage'] as Map? ?? {});
-            out.add(_messageBubble(
-              label: '助手${r.data['interrupted'] == true ? '（已中断）' : ''}',
-              body: body,
-              time: r.time,
-              usage: u.isEmpty
-                  ? null
-                  : '↑${_fmtTokens((u['inputTokens'] as num? ?? 0).toInt())}'
-                      ' ↓${_fmtTokens((u['outputTokens'] as num? ?? 0).toInt())}',
-              copyText: plain.join('\n'),
-            ));
+            out.add(
+              _messageBubble(
+                label: '助手${r.data['interrupted'] == true ? '（已中断）' : ''}',
+                body: body,
+                time: r.time,
+                usage: u.isEmpty
+                    ? null
+                    : '↑${_fmtTokens((u['inputTokens'] as num? ?? 0).toInt())}'
+                          ' ↓${_fmtTokens((u['outputTokens'] as num? ?? 0).toInt())}',
+                copyText: plain.join('\n'),
+              ),
+            );
           }
         case 'tool/call':
-          final e = tools['${r.data['callId'] ?? r.seq}'] ??
-              (_ToolEntry()..setCall('${r.data['name'] ?? 'tool'}', '${r.data['arguments'] ?? ''}'));
+          final e =
+              tools['${r.data['callId'] ?? r.seq}'] ??
+              (_ToolEntry()..setCall(
+                '${r.data['name'] ?? 'tool'}',
+                '${r.data['arguments'] ?? ''}',
+              ));
           if (!e.emitted) {
             e.emitted = true;
             out.add(_ToolCallCard(entry: e));
           }
         case 'tool/result':
-          final e = tools[_resultKey(r)] ??
+          final e =
+              tools[_resultKey(r)] ??
               (_ToolEntry()
                 ..setCall('工具结果', '')
                 ..resultText = ''
@@ -1669,7 +1850,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             prompts[curTurn] = t.split('\n').first;
           }
         } else if (r.type == 'assistant/message') {
-          final msg = Map<String, dynamic>.from(r.data['message'] as Map? ?? {});
+          final msg = Map<String, dynamic>.from(
+            r.data['message'] as Map? ?? {},
+          );
           for (final b in msg['content'] as List? ?? const []) {
             if (b is Map && b['type'] == 'text') {
               final t = '${b['text'] ?? ''}'.trim();
@@ -1730,14 +1913,19 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(text,
-                    style: theme.textTheme.labelSmall?.copyWith(color: color)),
+                Text(
+                  text,
+                  style: theme.textTheme.labelSmall?.copyWith(color: color),
+                ),
                 if (sub != null && sub.trim().isNotEmpty)
-                  Text(sub.trim(),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant)),
+                  Text(
+                    sub.trim(),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1762,13 +1950,18 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              Icon(Icons.checklist, size: 13, color: scheme.primary),
-              const SizedBox(width: 6),
-              Text('任务清单',
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: scheme.primary)),
-            ]),
+            Row(
+              children: [
+                Icon(Icons.checklist, size: 13, color: scheme.primary),
+                const SizedBox(width: 6),
+                Text(
+                  '任务清单',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.primary,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 6),
             for (final t in todos)
               Padding(
@@ -1791,12 +1984,14 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: Text('${t['content'] ?? ''}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            decoration: '${t['status'] ?? ''}' == 'completed'
-                                ? TextDecoration.lineThrough
-                                : null,
-                          )),
+                      child: Text(
+                        '${t['content'] ?? ''}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          decoration: '${t['status'] ?? ''}' == 'completed'
+                              ? TextDecoration.lineThrough
+                              : null,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -1828,16 +2023,20 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       case 'turn/start':
         return Padding(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
-          child: Text('— 第 ${r.data['turn'] ?? '?'} 轮 · ${_fmtClock(r.time)} —',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.labelSmall),
+          child: Text(
+            '— 第 ${r.data['turn'] ?? '?'} 轮 · ${_fmtClock(r.time)} —',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
         );
       case 'system/message':
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 16),
-          child: Text(_contentText(r.data['content'] ?? r.data['message']),
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(fontStyle: FontStyle.italic)),
+          child: Text(
+            _contentText(r.data['content'] ?? r.data['message']),
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(fontStyle: FontStyle.italic),
+          ),
         );
       // ---- 计划 / 任务 ----
       case 'todo/write':
@@ -1845,18 +2044,20 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       case 'plan/mode':
         final active = r.data['active'] == true;
         return _chipTile(
-            icon: Icons.map_outlined,
-            color: Acc.lightBlue(context),
-            text: active ? '计划模式 · 开启' : '计划模式 · 关闭');
+          icon: Icons.map_outlined,
+          color: Acc.lightBlue(context),
+          text: active ? '计划模式 · 开启' : '计划模式 · 关闭',
+        );
       // ---- 询问 / 授权 ----
       case 'approval/asked':
         final tool = '${r.data['toolName'] ?? '工具'}';
         final reason = '${r.data['reason'] ?? ''}';
         return _chipTile(
-            icon: Icons.lock_outline,
-            color: Acc.orange(context),
-            text: '授权询问 · $tool',
-            sub: reason.isEmpty ? '等待授权' : reason);
+          icon: Icons.lock_outline,
+          color: Acc.orange(context),
+          text: '授权询问 · $tool',
+          sub: reason.isEmpty ? '等待授权' : reason,
+        );
       case 'approval/decided':
         final outcome = '${r.data['outcome'] ?? ''}';
         final label = switch (outcome) {
@@ -1868,123 +2069,146 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         };
         final ok = outcome == 'allowed-once';
         return _chipTile(
-            icon: ok ? Icons.lock_open_outlined : Icons.block_outlined,
-            color: ok ? Acc.green(context) : scheme.error,
-            text: '授权结果 · $label');
+          icon: ok ? Icons.lock_open_outlined : Icons.block_outlined,
+          color: ok ? Acc.green(context) : scheme.error,
+          text: '授权结果 · $label',
+        );
       // ---- 子agent ----
       case 'subagent/descriptor':
         final mode = '${r.data['mode'] ?? ''}';
         return _chipTile(
-            icon: Icons.account_tree_outlined,
-            color: Acc.teal(context),
-            text:
-                '子agent · ${mode == 'one-shot' ? '一次性' : '可续聊'}',
-            sub: '${r.data['provider'] ?? ''}');
+          icon: Icons.account_tree_outlined,
+          color: Acc.teal(context),
+          text: '子agent · ${mode == 'one-shot' ? '一次性' : '可续聊'}',
+          sub: '${r.data['provider'] ?? ''}',
+        );
       // ---- 后台任务（workflow 运行记录） ----
       case 'tool-workflow/run-start':
         return _chipTile(
-            icon: Icons.run_circle_outlined,
-            color: Acc.cyan(context),
-            text: '后台任务 · ${r.data['name'] ?? ''}',
-            sub: '${r.data['runId'] ?? ''}');
+          icon: Icons.run_circle_outlined,
+          color: Acc.cyan(context),
+          text: '后台任务 · ${r.data['name'] ?? ''}',
+          sub: '${r.data['runId'] ?? ''}',
+        );
       case 'tool-workflow/agent-start':
         return _chipTile(
-            icon: Icons.person_add_alt_outlined,
-            color: Acc.cyan(context),
-            text: '后台成员 #${r.data['seq'] ?? '?'} · ${r.data['label'] ?? ''}',
-            sub: '${r.data['phase'] ?? ''}');
+          icon: Icons.person_add_alt_outlined,
+          color: Acc.cyan(context),
+          text: '后台成员 #${r.data['seq'] ?? '?'} · ${r.data['label'] ?? ''}',
+          sub: '${r.data['phase'] ?? ''}',
+        );
       case 'tool-workflow/agent-end':
         return _chipTile(
-            icon: Icons.done_all,
-            color: Acc.cyan(context),
-            text: '后台成员完成 #${r.data['seq'] ?? '?'} · ${r.data['outcome'] ?? ''}');
+          icon: Icons.done_all,
+          color: Acc.cyan(context),
+          text: '后台成员完成 #${r.data['seq'] ?? '?'} · ${r.data['outcome'] ?? ''}',
+        );
       case 'tool-workflow/run-end':
         return _chipTile(
-            icon: Icons.stop_circle_outlined,
-            color: Acc.cyan(context),
-            text: '后台任务结束 · ${r.data['stopReason'] ?? ''}');
+          icon: Icons.stop_circle_outlined,
+          color: Acc.cyan(context),
+          text: '后台任务结束 · ${r.data['stopReason'] ?? ''}',
+        );
       // ---- 命令 ----
       case 'command/run':
         final args = '${r.data['args'] ?? ''}';
         return _chipTile(
-            icon: Icons.terminal,
-            color: Acc.amber(context),
-            text: '命令 · /${r.data['name'] ?? ''}${args.isEmpty ? '' : ' $args'}');
+          icon: Icons.terminal,
+          color: Acc.amber(context),
+          text: '命令 · /${r.data['name'] ?? ''}${args.isEmpty ? '' : ' $args'}',
+        );
       case 'command/done':
         if (r.data['kind'] != 'error') return const SizedBox.shrink();
         return _chipTile(
-            icon: Icons.error_outline,
-            color: scheme.error,
-            text: '命令失败 · ${r.data['text'] ?? ''}');
+          icon: Icons.error_outline,
+          color: scheme.error,
+          text: '命令失败 · ${r.data['text'] ?? ''}',
+        );
       // ---- 上下文压缩 ----
       case 'compaction/start':
         return _chipTile(
-            icon: Icons.compress,
-            color: Acc.purple(context),
-            text: '上下文压缩 · 开始');
+          icon: Icons.compress,
+          color: Acc.purple(context),
+          text: '上下文压缩 · 开始',
+        );
       case 'compaction/summary':
         final n = (r.data['shadowedTokenCount'] as num? ?? 0).toInt();
         return _chipTile(
-            icon: Icons.compress,
-            color: Acc.purple(context),
-            text: '上下文压缩 · 完成',
-            sub: n > 0 ? '压缩 ${_fmtTokens(n)} tokens' : null);
+          icon: Icons.compress,
+          color: Acc.purple(context),
+          text: '上下文压缩 · 完成',
+          sub: n > 0 ? '压缩 ${_fmtTokens(n)} tokens' : null,
+        );
       case 'compaction/end':
         if (r.data['error'] == null) return const SizedBox.shrink();
         return _chipTile(
-            icon: Icons.error_outline,
-            color: scheme.error,
-            text: '上下文压缩 · 失败');
+          icon: Icons.error_outline,
+          color: scheme.error,
+          text: '上下文压缩 · 失败',
+        );
       // ---- 目标 ----
       case 'goal/change':
         final goal = Map<String, dynamic>.from(r.data['goal'] as Map? ?? {});
-        final objective =
-            '${goal['objective'] ?? goal['goalId'] ?? ''}';
+        final objective = '${goal['objective'] ?? goal['goalId'] ?? ''}';
         final op = '${r.data['operation'] ?? ''}';
         return _chipTile(
-            icon: Icons.flag_outlined,
-            color: Acc.pink(context),
-            text: '目标 · ${op == 'clear' ? '已清除' : objective.isEmpty ? op : objective}');
+          icon: Icons.flag_outlined,
+          color: Acc.pink(context),
+          text:
+              '目标 · ${op == 'clear'
+                  ? '已清除'
+                  : objective.isEmpty
+                  ? op
+                  : objective}',
+        );
       // ---- 交付物 ----
       case 'deliverables/presented':
-        final files = (r.data['files'] as List? ?? []).whereType<Map>().toList();
+        final files = (r.data['files'] as List? ?? [])
+            .whereType<Map>()
+            .toList();
         final paths = files
             .map((f) => '${f['path'] ?? ''}')
             .where((s) => s.isNotEmpty)
             .join('、');
         return _chipTile(
-            icon: Icons.inventory_2_outlined,
-            color: Acc.green(context),
-            text: '交付物 · ${files.length} 个文件',
-            sub: paths);
+          icon: Icons.inventory_2_outlined,
+          color: Acc.green(context),
+          text: '交付物 · ${files.length} 个文件',
+          sub: paths,
+        );
       // ---- 状态小事件 ----
       case 'model/selection':
         return _chipTile(
-            icon: Icons.tune,
-            color: scheme.onSurfaceVariant,
-            text: '模型 · ${r.data['model'] ?? r.data['modelId'] ?? ''}');
+          icon: Icons.tune,
+          color: scheme.onSurfaceVariant,
+          text: '模型 · ${r.data['model'] ?? r.data['modelId'] ?? ''}',
+        );
       case 'agent-preset/selected':
         return _chipTile(
-            icon: Icons.smart_toy_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '预设 · ${r.data['agentPreset'] ?? ''}');
+          icon: Icons.smart_toy_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '预设 · ${r.data['agentPreset'] ?? ''}',
+        );
       case 'sandbox/mode':
         return _chipTile(
-            icon: Icons.security_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '沙箱 · ${r.data['mode'] ?? ''}');
+          icon: Icons.security_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '沙箱 · ${r.data['mode'] ?? ''}',
+        );
       // ---- 权限 / 审批策略（与 sandbox/mode 同族状态条，web 端同组渲染） ----
       case 'permission/preset':
         return _chipTile(
-            icon: Icons.admin_panel_settings_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '权限预设 · ${r.data['preset'] ?? ''}');
+          icon: Icons.admin_panel_settings_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '权限预设 · ${r.data['preset'] ?? ''}',
+        );
       case 'approval/policy':
         return _chipTile(
-            icon: Icons.verified_user_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '审批策略 · ${r.data['policy'] ?? ''}',
-            sub: '${r.data['source'] ?? ''}' == 'delegation' ? '来源：委派' : null);
+          icon: Icons.verified_user_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '审批策略 · ${r.data['policy'] ?? ''}',
+          sub: '${r.data['source'] ?? ''}' == 'delegation' ? '来源：委派' : null,
+        );
       // ---- 模型重试（透明化卡顿/失败恢复） ----
       case 'llm/retry':
         final retryNo = '${r.data['retry'] ?? '?'}';
@@ -1995,46 +2219,52 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             ? '${failure['message'] ?? failure['name'] ?? failure['code'] ?? ''}'
             : '$failure';
         return _chipTile(
-            icon: Icons.replay_outlined,
-            color: Acc.amber(context),
-            text:
-                '模型重试 · 第 $retryNo${maxNo.isEmpty ? '' : '/$maxNo'} 次（${delayMs}ms 后）',
-            sub: failText.isEmpty || failText == 'null' ? null : failText);
+          icon: Icons.replay_outlined,
+          color: Acc.amber(context),
+          text:
+              '模型重试 · 第 $retryNo${maxNo.isEmpty ? '' : '/$maxNo'} 次（${delayMs}ms 后）',
+          sub: failText.isEmpty || failText == 'null' ? null : failText,
+        );
       case 'llm/retry-started':
         return _chipTile(
-            icon: Icons.replay_outlined,
-            color: Acc.amber(context),
-            text: '模型重试开始 · 第 ${r.data['retry'] ?? '?'} 次');
+          icon: Icons.replay_outlined,
+          color: Acc.amber(context),
+          text: '模型重试开始 · 第 ${r.data['retry'] ?? '?'} 次',
+        );
       // ---- 消息反馈（👍/👎 + 备注） ----
       case 'feedback/message-put':
         final note = '${r.data['note'] ?? ''}'.trim();
         return _chipTile(
-            icon: '${r.data['rating']}' == 'negative'
-                ? Icons.thumb_down_alt_outlined
-                : Icons.thumb_up_alt_outlined,
-            color: Acc.teal(context),
-            text: '消息反馈 · ${'${r.data['rating']}' == 'negative' ? '差评' : '好评'}',
-            sub: note.isEmpty ? null : note);
+          icon: '${r.data['rating']}' == 'negative'
+              ? Icons.thumb_down_alt_outlined
+              : Icons.thumb_up_alt_outlined,
+          color: Acc.teal(context),
+          text: '消息反馈 · ${'${r.data['rating']}' == 'negative' ? '差评' : '好评'}',
+          sub: note.isEmpty ? null : note,
+        );
       case 'feedback/message-delete':
         return _chipTile(
-            icon: Icons.delete_outline,
-            color: scheme.onSurfaceVariant,
-            text: '消息反馈 · 已撤下');
+          icon: Icons.delete_outline,
+          color: scheme.onSurfaceVariant,
+          text: '消息反馈 · 已撤下',
+        );
       case 'feedback/record':
         return _chipTile(
-            icon: Icons.rate_review_outlined,
-            color: Acc.teal(context),
-            text: '反馈记录 · ${r.data['kind'] ?? r.data['rating'] ?? ''}',
-            sub: '${r.data['note'] ?? ''}'.trim().isEmpty
-                ? null
-                : '${r.data['note']}'.trim());
+          icon: Icons.rate_review_outlined,
+          color: Acc.teal(context),
+          text: '反馈记录 · ${r.data['kind'] ?? r.data['rating'] ?? ''}',
+          sub: '${r.data['note'] ?? ''}'.trim().isEmpty
+              ? null
+              : '${r.data['note']}'.trim(),
+        );
       // ---- 队列消息改写 / 撤回（inbox splice） ----
       // 语义：insert=入队、remove=出队（送达）、同事件两者并存=改写、
       // outcome:'canceled'=撤回。纯入队/出队是管道流量（会以 user/message
       // 呈现或随轮次消化），不渲染；只显示真正的撤回与改写。
       case 'agent/inbox/spliced':
-        final inserted =
-            (r.data['inserted'] as List? ?? []).whereType<Map>().toList();
+        final inserted = (r.data['inserted'] as List? ?? [])
+            .whereType<Map>()
+            .toList();
         final removed = (r.data['removedCount'] as num? ?? 0).toInt();
         final canceled = '${r.data['outcome'] ?? ''}' == 'canceled';
         final edited = removed > 0 && inserted.isNotEmpty;
@@ -2044,12 +2274,13 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             .where((s) => s.trim().isNotEmpty)
             .join('\n');
         return _chipTile(
-            icon: Icons.edit_note_outlined,
-            color: Acc.pink(context),
-            text: canceled
-                ? '消息撤回'
-                : '消息改写 · 撤下 $removed 条 / 补入 ${inserted.length} 条',
-            sub: preview.isEmpty ? null : preview);
+          icon: Icons.edit_note_outlined,
+          color: Acc.pink(context),
+          text: canceled
+              ? '消息撤回'
+              : '消息改写 · 撤下 $removed 条 / 补入 ${inserted.length} 条',
+          sub: preview.isEmpty ? null : preview,
+        );
       // ---- 定时任务变更 ----
       case 'schedule/change':
         final op = '${r.data['operation'] ?? ''}';
@@ -2060,68 +2291,83 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           _ => op,
         };
         return _chipTile(
-            icon: Icons.schedule_outlined,
-            color: Acc.lightBlue(context),
-            text: '定时任务 · $opLabel',
-            sub: '${r.data['id'] ?? ''}');
+          icon: Icons.schedule_outlined,
+          color: Acc.lightBlue(context),
+          text: '定时任务 · $opLabel',
+          sub: '${r.data['id'] ?? ''}',
+        );
       // ---- B 档：低频事件折叠成一行小 tile，不刷屏也不失可见性 ----
       case 'assistant/attempt':
         return _chipTile(
-            icon: Icons.history_edu_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '一次未完成的输出（随后重试）');
+          icon: Icons.history_edu_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '一次未完成的输出（随后重试）',
+        );
       case 'hook/invoked':
         return _chipTile(
-            icon: Icons.bolt_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '钩子 · ${r.data['name'] ?? r.data['hook'] ?? ''}');
+          icon: Icons.bolt_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '钩子 · ${r.data['name'] ?? r.data['hook'] ?? ''}',
+        );
       case 'hook/result':
         if (r.data['error'] == null && '${r.data['ok']}' != 'false') {
           return const SizedBox.shrink();
         }
         return _chipTile(
-            icon: Icons.error_outline,
-            color: scheme.error,
-            text: '钩子失败 · ${r.data['name'] ?? r.data['hook'] ?? ''}',
-            sub: '${r.data['error'] ?? r.data['message'] ?? ''}');
+          icon: Icons.error_outline,
+          color: scheme.error,
+          text: '钩子失败 · ${r.data['name'] ?? r.data['hook'] ?? ''}',
+          sub: '${r.data['error'] ?? r.data['message'] ?? ''}',
+        );
       case 'subagent/catalog':
         return _chipTile(
-            icon: Icons.account_tree_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '子agent 目录更新');
+          icon: Icons.account_tree_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '子agent 目录更新',
+        );
       case 'subagent/model-selection-policy':
         return _chipTile(
-            icon: Icons.account_tree_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '子agent 模型策略更新');
+          icon: Icons.account_tree_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '子agent 模型策略更新',
+        );
       case 'team/member':
         return _chipTile(
-            icon: Icons.groups_outlined,
-            color: Acc.cyan(context),
-            text: '团队成员 · ${r.data['member'] is Map ? '${(r.data['member'] as Map)['name'] ?? (r.data['member'] as Map)['role'] ?? ''}' : ''}');
+          icon: Icons.groups_outlined,
+          color: Acc.cyan(context),
+          text:
+              '团队成员 · ${r.data['member'] is Map ? '${(r.data['member'] as Map)['name'] ?? (r.data['member'] as Map)['role'] ?? ''}' : ''}',
+        );
       case 'team/task':
         return _chipTile(
-            icon: Icons.groups_outlined,
-            color: Acc.cyan(context),
-            text: '团队任务 · ${r.data['task'] is Map ? '${(r.data['task'] as Map)['title'] ?? (r.data['task'] as Map)['summary'] ?? (r.data['task'] as Map)['status'] ?? ''}' : ''}');
+          icon: Icons.groups_outlined,
+          color: Acc.cyan(context),
+          text:
+              '团队任务 · ${r.data['task'] is Map ? '${(r.data['task'] as Map)['title'] ?? (r.data['task'] as Map)['summary'] ?? (r.data['task'] as Map)['status'] ?? ''}' : ''}',
+        );
       case 'team/message/queued':
         return _chipTile(
-            icon: Icons.groups_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '团队消息 · 排队');
+          icon: Icons.groups_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '团队消息 · 排队',
+        );
       case 'team/message/delivered':
         return _chipTile(
-            icon: Icons.groups_outlined,
-            color: scheme.onSurfaceVariant,
-            text: '团队消息 · 已送达');
+          icon: Icons.groups_outlined,
+          color: scheme.onSurfaceVariant,
+          text: '团队消息 · 已送达',
+        );
       case 'compaction/prune':
-        final range = Map<String, dynamic>.from(r.data['shadowedRange'] as Map? ?? {});
+        final range = Map<String, dynamic>.from(
+          r.data['shadowedRange'] as Map? ?? {},
+        );
         final tok = (r.data['shadowedTokenCount'] as num? ?? 0).toInt();
         return _chipTile(
-            icon: Icons.compress,
-            color: Acc.purple(context),
-            text: '上下文压缩 · 裁剪 #${range['start'] ?? '?'}–#${range['end'] ?? '?'}',
-            sub: tok > 0 ? '${_fmtTokens(tok)} tokens' : null);
+          icon: Icons.compress,
+          color: Acc.purple(context),
+          text: '上下文压缩 · 裁剪 #${range['start'] ?? '?'}–#${range['end'] ?? '?'}',
+          sub: tok > 0 ? '${_fmtTokens(tok)} tokens' : null,
+        );
       default:
         // 剩余纯协议内部噪声不渲染（web 同样不显示）：step/*、turn/end、
         // request/*、session/end-seed、session/title-llm-request、
@@ -2190,17 +2436,28 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             icon: const Icon(Icons.account_tree_outlined),
           ),
           IconButton(
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => TrajectoryPage(
-                records: _sorted,
-                title: '轨迹 · ${widget.summary.title.isEmpty ? widget.summary.sessionId : widget.summary.title}',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => TrajectoryPage(
+                  records: _sorted,
+                  title:
+                      '轨迹 · ${widget.summary.title.isEmpty ? widget.summary.sessionId : widget.summary.title}',
+                ),
               ),
-            )),
+            ),
             tooltip: '轨迹',
             icon: const Icon(Icons.timeline),
           ),
-          IconButton(onPressed: _cancel, tooltip: '停止当前轮', icon: const Icon(Icons.stop_circle_outlined)),
-          IconButton(onPressed: _start, tooltip: '重新订阅', icon: const Icon(Icons.refresh)),
+          IconButton(
+            onPressed: _cancel,
+            tooltip: '停止当前轮',
+            icon: const Icon(Icons.stop_circle_outlined),
+          ),
+          IconButton(
+            onPressed: _start,
+            tooltip: '重新订阅',
+            icon: const Icon(Icons.refresh),
+          ),
         ],
       ),
       body: Column(
@@ -2210,10 +2467,17 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
               color: Theme.of(context).colorScheme.errorContainer,
               child: Padding(
                 padding: const EdgeInsets.all(8),
-                child: Row(children: [
-                  Expanded(child: Text(_error!, style: const TextStyle(fontSize: 12))),
-                  TextButton(onPressed: _start, child: const Text('重试')),
-                ]),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _error!,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    TextButton(onPressed: _start, child: const Text('重试')),
+                  ],
+                ),
               ),
             ),
           if (_hasMore)
@@ -2221,54 +2485,68 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : Builder(builder: (_) {
-                    final items = _buildItems(records);
-                    return Stack(children: [
-                      ScrollablePositionedList.builder(
-                        itemScrollController: _itemScrollCtrl,
-                        itemPositionsListener: _itemPositions,
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        itemCount: items.length,
-                        itemBuilder: (_, i) => items[i],
-                      ),
-                      // 轮次导航轨（≥2 轮才显示，对齐桌面）
-                      if (_turnItems.length >= 2)
-                        Positioned.fill(
-                          child: TurnRail(
-                            items: _turnItems,
-                            activeTurn: _activeTurn,
-                            runningTurn: _running && _turnItems.isNotEmpty
-                                ? _turnItems.last.turn
-                                : null,
-                            onJump: _jumpToTurn,
+                : Builder(
+                    builder: (_) {
+                      final items = _buildItems(records);
+                      return Stack(
+                        children: [
+                          ScrollablePositionedList.builder(
+                            itemScrollController: _itemScrollCtrl,
+                            itemPositionsListener: _itemPositions,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            itemCount: items.length,
+                            itemBuilder: (_, i) => items[i],
                           ),
-                        ),
-                    ]);
-                  }),
+                          // 轮次导航轨（≥2 轮才显示，对齐桌面）
+                          if (_turnItems.length >= 2)
+                            Positioned.fill(
+                              child: TurnRail(
+                                items: _turnItems,
+                                activeTurn: _activeTurn,
+                                runningTurn: _running && _turnItems.isNotEmpty
+                                    ? _turnItems.last.turn
+                                    : null,
+                                onJump: _jumpToTurn,
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
           ),
           if (_running)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 2, 14, 2),
-              child: Row(children: [
-                const SizedBox(
+              child: Row(
+                children: [
+                  const SizedBox(
                     width: 11,
                     height: 11,
-                    child: CircularProgressIndicator(strokeWidth: 1.6)),
-                const SizedBox(width: 7),
-                Text(
-                  '深度求索中… ${_elapsedLabel}',
-                  style: Theme.of(context)
-                      .textTheme
-                      .labelSmall
-                      ?.copyWith(color: Theme.of(context).colorScheme.primary),
-                ),
-              ]),
+                    child: CircularProgressIndicator(strokeWidth: 1.6),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    '深度求索中… ${_elapsedLabel}',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ValueListenableBuilder(
             valueListenable: InteractionCenter.I.pending,
             builder: (context, _, __) {
-              final pending = InteractionCenter.I.forAgent(widget.summary.sessionId);
+              final pending = InteractionCenter.I.forAgent(
+                widget.summary.sessionId,
+              );
+              debugPrint(
+                '[page] vlb pending=${pending?.eventId ?? "null"} '
+                'agent=${widget.summary.sessionId}',
+              );
               if (pending != null) {
+                // 与输入框同配方：普通子级 + 内容自适应。作答卡内部自己限高
+                // （键盘感知），保证提交按钮行永远可见。
                 return SafeArea(
                   child: InteractionComposer(
                     interaction: pending,
@@ -2303,16 +2581,19 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                       Container(
                         decoration: BoxDecoration(
                           color: tk.composerFill,
-                          borderRadius: BorderRadius.circular(tk.composerRadius),
+                          borderRadius: BorderRadius.circular(
+                            tk.composerRadius,
+                          ),
                           border: tk.composerBorder == null
                               ? null
                               : Border.all(color: tk.composerBorder!),
                           boxShadow: [
                             if (tk.glowColor != null)
                               BoxShadow(
-                                  color: tk.glowColor!,
-                                  blurRadius: 22,
-                                  offset: const Offset(0, 6)),
+                                color: tk.glowColor!,
+                                blurRadius: 22,
+                                offset: const Offset(0, 6),
+                              ),
                           ],
                         ),
                         padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
@@ -2330,10 +2611,12 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                 hintText: _placeholderText(),
                                 hintMaxLines: 1,
                                 hintStyle: TextStyle(
-                                    fontSize: 15,
-                                    color: scheme.onSurfaceVariant),
-                                contentPadding:
-                                    const EdgeInsets.symmetric(vertical: 8),
+                                  fontSize: 15,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
                               ),
                               style: const TextStyle(fontSize: 15),
                               onSubmitted: (_) => _send(),
@@ -2356,8 +2639,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                   ),
                                 ),
                                 Tooltip(
-                                  message:
-                                      _planActive ? '计划中（点击退出）' : '计划',
+                                  message: _planActive ? '计划中（点击退出）' : '计划',
                                   child: _composerPill(
                                     icon: Icons.map_outlined,
                                     label: '计划',
@@ -2408,12 +2690,15 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                                 padding: EdgeInsets.all(9),
                                                 child:
                                                     CircularProgressIndicator(
-                                                        strokeWidth: 2,
-                                                        color: Colors.white),
+                                                      strokeWidth: 2,
+                                                      color: Colors.white,
+                                                    ),
                                               )
-                                            : Icon(Icons.arrow_upward,
+                                            : Icon(
+                                                Icons.arrow_upward,
                                                 size: 18,
-                                                color: scheme.onPrimary),
+                                                color: scheme.onPrimary,
+                                              ),
                                       ),
                                     ),
                                   ),
@@ -2506,77 +2791,96 @@ class _ReferenceSheetState extends State<_ReferenceSheet> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding:
-          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: SizedBox(
         height: 420,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
-              controller: _q,
-              autofocus: true,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.alternate_email, size: 18),
-                hintText: '搜索文件或对话…',
-                border: OutlineInputBorder(),
-                isDense: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: TextField(
+                controller: _q,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.alternate_email, size: 18),
+                  hintText: '搜索文件或对话…',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
               ),
             ),
-          ),
-          if (_loading)
-            const LinearProgressIndicator(minHeight: 2),
-          Expanded(
-            child: ListView(children: [
-              if (_files.isNotEmpty)
-                _groupHeader(scheme, Icons.folder_outlined, '文件'),
-              for (final raw in _files)
-                if (raw is Map)
-                  ListTile(
-                    dense: true,
-                    leading: Icon(
-                        '${raw['kind']}' == 'directory'
-                            ? Icons.folder_outlined
-                            : Icons.insert_drive_file_outlined,
-                        size: 20,
-                        color: scheme.onSurfaceVariant),
-                    title: Text('${raw['path'] ?? ''}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13)),
-                    onTap: () =>
-                        Navigator.pop(context, _fileMention(Map<String, dynamic>.from(raw))),
-                  ),
-              if (_sessions.isNotEmpty)
-                _groupHeader(scheme, Icons.forum_outlined, '会话'),
-              for (final raw in _sessions)
-                if (raw is Map)
-                  ListTile(
-                    dense: true,
-                    leading:
-                        const Icon(Icons.chat_bubble_outline, size: 20),
-                    title: Text('${raw['label'] ?? ''}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13)),
-                    subtitle: raw['cwd'] == null
-                        ? null
-                        : Text('${raw['cwd']}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 10)),
-                    onTap: () => Navigator.pop(context, '${raw['mention'] ?? ''}'),
-                  ),
-              if (!_loading && _files.isEmpty && _sessions.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('无匹配候选',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey)),
-                ),
-            ]),
-          ),
-        ]),
+            if (_loading) const LinearProgressIndicator(minHeight: 2),
+            Expanded(
+              child: ListView(
+                children: [
+                  if (_files.isNotEmpty)
+                    _groupHeader(scheme, Icons.folder_outlined, '文件'),
+                  for (final raw in _files)
+                    if (raw is Map)
+                      ListTile(
+                        dense: true,
+                        leading: Icon(
+                          '${raw['kind']}' == 'directory'
+                              ? Icons.folder_outlined
+                              : Icons.insert_drive_file_outlined,
+                          size: 20,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        title: Text(
+                          '${raw['path'] ?? ''}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        onTap: () => Navigator.pop(
+                          context,
+                          _fileMention(Map<String, dynamic>.from(raw)),
+                        ),
+                      ),
+                  if (_sessions.isNotEmpty)
+                    _groupHeader(scheme, Icons.forum_outlined, '会话'),
+                  for (final raw in _sessions)
+                    if (raw is Map)
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(
+                          Icons.chat_bubble_outline,
+                          size: 20,
+                        ),
+                        title: Text(
+                          '${raw['label'] ?? ''}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        subtitle: raw['cwd'] == null
+                            ? null
+                            : Text(
+                                '${raw['cwd']}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 10),
+                              ),
+                        onTap: () =>
+                            Navigator.pop(context, '${raw['mention'] ?? ''}'),
+                      ),
+                  if (!_loading && _files.isEmpty && _sessions.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        '无匹配候选',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2584,15 +2888,20 @@ class _ReferenceSheetState extends State<_ReferenceSheet> {
   Widget _groupHeader(ColorScheme scheme, IconData icon, String label) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
-      child: Row(children: [
-        Icon(icon, size: 14, color: scheme.primary),
-        const SizedBox(width: 6),
-        Text(label,
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: scheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            label,
             style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: scheme.primary)),
-      ]),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: scheme.primary,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2627,11 +2936,13 @@ class _QueueEditDialogState extends State<_QueueEditDialog> {
       content: TextField(controller: _ctrl, maxLines: 5, autofocus: true),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context, null),
-            child: const Text('取消')),
+          onPressed: () => Navigator.pop(context, null),
+          child: const Text('取消'),
+        ),
         FilledButton(
-            onPressed: () => Navigator.pop(context, _ctrl.text),
-            child: const Text('保存')),
+          onPressed: () => Navigator.pop(context, _ctrl.text),
+          child: const Text('保存'),
+        ),
       ],
     );
   }
@@ -2651,11 +2962,14 @@ String _argSummary(String raw) {
   try {
     final v = jsonDecode(raw);
     if (v is Map) {
-      return v.entries.take(3).map((e) {
-        var val = '${e.value}'.replaceAll('\n', ' ');
-        if (val.length > 24) val = '${val.substring(0, 24)}…';
-        return '${e.key}=$val';
-      }).join(', ');
+      return v.entries
+          .take(3)
+          .map((e) {
+            var val = '${e.value}'.replaceAll('\n', ' ');
+            if (val.length > 24) val = '${val.substring(0, 24)}…';
+            return '${e.key}=$val';
+          })
+          .join(', ');
     }
     return '$v'.replaceAll('\n', ' ');
   } catch (_) {
@@ -2750,83 +3064,120 @@ class _ToolCallCardState extends State<_ToolCallCard> {
     }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 14),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        InkWell(
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: Row(children: [
-            if (e.isError)
-              Icon(Icons.close, size: 14, color: scheme.error)
-            else if (done)
-              Icon(Icons.check, size: 14, color: Acc.green(context))
-            else
-              SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(strokeWidth: 1.8, color: scheme.primary)),
-            const SizedBox(width: 8),
-            Text(e.name,
-                style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                e.arguments.isEmpty ? '' : e.argSummary,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant.withValues(alpha: 0.8)),
-              ),
-            ),
-            if (e.durationMs != null) ...[
-              const SizedBox(width: 8),
-              Text(_fmtDuration(e.durationMs!),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7))),
-            ],
-            Icon(_expanded ? Icons.expand_less : Icons.expand_more,
-                size: 16, color: scheme.onSurfaceVariant),
-          ]),
-        ),
-        if (_expanded)
-          Padding(
-            padding: const EdgeInsets.only(left: 22, top: 6),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (e.callMs != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    [
-                      _fmtClock(e.callMs!, withSeconds: true),
-                      if (e.durationMs != null) '耗时 ${_fmtDuration(e.durationMs!)}',
-                    ].join(' · '),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Row(
+              children: [
+                if (e.isError)
+                  Icon(Icons.close, size: 14, color: scheme.error)
+                else if (done)
+                  Icon(Icons.check, size: 14, color: Acc.green(context))
+                else
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.8,
+                      color: scheme.primary,
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                Text(
+                  e.name,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              if (e.arguments.isNotEmpty) ...[
-                Row(children: [
-                  Text('参数', style: theme.textTheme.labelSmall),
-                  const Spacer(),
-                  _copyIcon(e.argsPretty),
-                ]),
-                const SizedBox(height: 2),
-                Text(e.argsPretty,
-                    style: _monoStyle.copyWith(color: scheme.onSurfaceVariant)),
-                const SizedBox(height: 8),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    e.arguments.isEmpty ? '' : e.argSummary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ),
+                if (e.durationMs != null) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    _fmtDuration(e.durationMs!),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+                Icon(
+                  _expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 16,
+                  color: scheme.onSurfaceVariant,
+                ),
               ],
-              Row(children: [
-                Text('结果', style: theme.textTheme.labelSmall),
-                const Spacer(),
-                if (done && e.resultText.isNotEmpty) _copyIcon(e.resultText),
-              ]),
-              const SizedBox(height: 2),
-              Text(
-                done ? (e.resultText.isEmpty ? '（空）' : e.resultText) : '运行中…',
-                style: _monoStyle.copyWith(
-                    color: e.isError ? scheme.error : scheme.onSurfaceVariant),
-              ),
-            ]),
+            ),
           ),
-      ]),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.only(left: 22, top: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (e.callMs != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        [
+                          _fmtClock(e.callMs!, withSeconds: true),
+                          if (e.durationMs != null)
+                            '耗时 ${_fmtDuration(e.durationMs!)}',
+                        ].join(' · '),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
+                  if (e.arguments.isNotEmpty) ...[
+                    Row(
+                      children: [
+                        Text('参数', style: theme.textTheme.labelSmall),
+                        const Spacer(),
+                        _copyIcon(e.argsPretty),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      e.argsPretty,
+                      style: _monoStyle.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  Row(
+                    children: [
+                      Text('结果', style: theme.textTheme.labelSmall),
+                      const Spacer(),
+                      if (done && e.resultText.isNotEmpty)
+                        _copyIcon(e.resultText),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    done
+                        ? (e.resultText.isEmpty ? '（空）' : e.resultText)
+                        : '运行中…',
+                    style: _monoStyle.copyWith(
+                      color: e.isError ? scheme.error : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -2835,7 +3186,10 @@ class _ToolCallCardState extends State<_ToolCallCard> {
     try {
       final j = jsonDecode(json);
       final list = (j is Map ? j[key] as List? : null) ?? const [];
-      return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      return list
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
     } catch (_) {
       return const [];
     }
@@ -2867,69 +3221,101 @@ class _ToolCallCardState extends State<_ToolCallCard> {
           color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-              color: (e.isError
-                      ? scheme.error
-                      : done
-                          ? Acc.green(context)
-                          : Acc.lightBlue(context))
-                  .withValues(alpha: 0.45)),
+            color:
+                (e.isError
+                        ? scheme.error
+                        : done
+                        ? Acc.green(context)
+                        : Acc.lightBlue(context))
+                    .withValues(alpha: 0.45),
+          ),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.map_outlined, size: 14, color: Acc.lightBlue(context)),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(title,
-                  style: theme.textTheme.labelMedium
-                      ?.copyWith(fontWeight: FontWeight.w600)),
-            ),
-            if (!done)
-              SizedBox(
-                  width: 12,
-                  height: 12,
-                  child:
-                      CircularProgressIndicator(strokeWidth: 1.8, color: scheme.primary))
-            else
-              Icon(e.isError ? Icons.close : Icons.check,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.map_outlined,
                   size: 14,
-                  color: e.isError ? scheme.error : Acc.green(context)),
-            if (e.durationMs != null) ...[
-              const SizedBox(width: 6),
-              Text(_fmtDuration(e.durationMs!),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7))),
-            ],
-          ]),
-          const SizedBox(height: 8),
-          MarkdownText(plan),
-          if (done) ...[
+                  color: Acc.lightBlue(context),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (!done)
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.8,
+                      color: scheme.primary,
+                    ),
+                  )
+                else
+                  Icon(
+                    e.isError ? Icons.close : Icons.check,
+                    size: 14,
+                    color: e.isError ? scheme.error : Acc.green(context),
+                  ),
+                if (e.durationMs != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    _fmtDuration(e.durationMs!),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ],
+            ),
             const SizedBox(height: 8),
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 1),
-                child: Icon(e.isError ? Icons.close : Icons.check_circle,
-                    size: 12, color: e.isError ? scheme.error : Acc.green(context)),
+            MarkdownText(plan),
+            if (done) ...[
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Icon(
+                      e.isError ? Icons.close : Icons.check_circle,
+                      size: 12,
+                      color: e.isError ? scheme.error : Acc.green(context),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      e.isError
+                          ? e.resultText
+                          : (e.resultText.contains('approved')
+                                ? '计划已批准 · 退出计划模式，开始执行'
+                                : e.resultText),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: e.isError ? scheme.error : Acc.green(context),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 5),
-              Expanded(
-                child: Text(
-                  e.isError
-                      ? e.resultText
-                      : (e.resultText.contains('approved')
-                          ? '计划已批准 · 退出计划模式，开始执行'
-                          : e.resultText),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                      color: e.isError ? scheme.error : Acc.green(context)),
+            ] else ...[
+              const SizedBox(height: 8),
+              Text(
+                '等待评审…',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
-            ]),
-          ] else ...[
-            const SizedBox(height: 8),
-            Text('等待评审…',
-                style: theme.textTheme.labelSmall
-                    ?.copyWith(color: scheme.onSurfaceVariant)),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }
@@ -2945,7 +3331,10 @@ class _ToolCallCardState extends State<_ToolCallCard> {
 
   /// ask_user_question 问题卡：问题/选项/多选标注 + 回答展示。
   Widget _questionCard(
-      BuildContext context, _ToolEntry e, List<Map<String, dynamic>> questions) {
+    BuildContext context,
+    _ToolEntry e,
+    List<Map<String, dynamic>> questions,
+  ) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final answers = _parseMapList(e.resultText, 'answers');
@@ -2965,47 +3354,74 @@ class _ToolCallCardState extends State<_ToolCallCard> {
           color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-              color: (e.hasResult ? Acc.green(context) : Acc.orange(context))
-                  .withValues(alpha: 0.45)),
+            color: (e.hasResult ? Acc.green(context) : Acc.orange(context))
+                .withValues(alpha: 0.45),
+          ),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.question_answer_outlined,
-                size: 14,
-                color: e.hasResult ? Acc.green(context) : Acc.orange(context)),
-            const SizedBox(width: 6),
-            Text('询问 · ${questions.length} 个问题',
-                style: theme.textTheme.labelMedium
-                    ?.copyWith(fontWeight: FontWeight.w600)),
-            const Spacer(),
-            if (!e.hasResult)
-              SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 1.8, color: scheme.primary))
-            else
-              Icon(Icons.check, size: 14, color: Acc.green(context)),
-            if (e.durationMs != null) ...[
-              const SizedBox(width: 6),
-              Text(_fmtDuration(e.durationMs!),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7))),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.question_answer_outlined,
+                  size: 14,
+                  color: e.hasResult ? Acc.green(context) : Acc.orange(context),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '询问 · ${questions.length} 个问题',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                if (!e.hasResult)
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.8,
+                      color: scheme.primary,
+                    ),
+                  )
+                else
+                  Icon(Icons.check, size: 14, color: Acc.green(context)),
+                if (e.durationMs != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    _fmtDuration(e.durationMs!),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 10),
+            for (var i = 0; i < questions.length; i++) ...[
+              if (i > 0) const Divider(height: 16),
+              _questionBlock(
+                context,
+                i,
+                questions[i],
+                answerOf('${questions[i]['id'] ?? ''}'),
+                e.hasResult,
+              ),
             ],
-          ]),
-          const SizedBox(height: 10),
-          for (var i = 0; i < questions.length; i++) ...[
-            if (i > 0) const Divider(height: 16),
-            _questionBlock(context, i, questions[i],
-                answerOf('${questions[i]['id'] ?? ''}'), e.hasResult),
           ],
-        ]),
+        ),
       ),
     );
   }
 
-  Widget _questionBlock(BuildContext context, int index, Map<String, dynamic> q,
-      Map<String, dynamic>? answer, bool hasResult) {
+  Widget _questionBlock(
+    BuildContext context,
+    int index,
+    Map<String, dynamic> q,
+    Map<String, dynamic>? answer,
+    bool hasResult,
+  ) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final header = '${q['header'] ?? ''}'.trim();
@@ -3013,157 +3429,216 @@ class _ToolCallCardState extends State<_ToolCallCard> {
     final detail = '${q['detail'] ?? ''}'.trim();
     final multi = q['multi_select'] == true;
     final options = (q['options'] as List? ?? []).whereType<Map>().toList();
-    final selected =
-        ((answer?['selected'] as List?) ?? const []).whereType<String>().toSet();
+    final selected = ((answer?['selected'] as List?) ?? const [])
+        .whereType<String>()
+        .toSet();
     final custom = '${answer?['custom'] ?? ''}'.trim();
     final answered = answer != null;
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (header.isNotEmpty)
-        Text(questionLabel(q, header),
-            style: theme.textTheme.labelSmall
-                ?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600)),
-      if (question.isNotEmpty) ...[
-        if (header.isNotEmpty) const SizedBox(height: 2),
-        Text(question, style: theme.textTheme.bodyMedium),
-      ],
-      // 携带正文的询问（如计划评审的 detail=完整计划）：正文按 Markdown
-      // 全量渲染，不再丢细节。
-      if (detail.isNotEmpty) ...[
-        const SizedBox(height: 6),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(8),
-            border:
-                Border.all(color: scheme.outlineVariant.withValues(alpha: 0.4)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (header.isNotEmpty)
+          Text(
+            questionLabel(q, header),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          child: MarkdownText(detail),
-        ),
-      ],
-      if (options.isNotEmpty) ...[
-        const SizedBox(height: 6),
-        // 选项一列一行（标签 + 描述常显），回答按行展示，细节不丢失。
-        for (final o in options)
-          Builder(builder: (context) {
-            final label = '${o['label'] ?? ''}';
-            final desc = '${o['description'] ?? ''}'.trim();
-            final isSel = selected.contains(label);
-            return Container(
-              margin: const EdgeInsets.only(bottom: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: BoxDecoration(
-                color: isSel
-                    ? Acc.green(context).withValues(alpha: 0.13)
-                    : scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: isSel
-                        ? Acc.green(context).withValues(alpha: 0.5)
-                        : scheme.outlineVariant.withValues(alpha: 0.4)),
+        if (question.isNotEmpty) ...[
+          if (header.isNotEmpty) const SizedBox(height: 2),
+          Text(question, style: theme.textTheme.bodyMedium),
+        ],
+        // 携带正文的询问（如计划评审的 detail=完整计划）：正文按 Markdown
+        // 全量渲染，不再丢细节。
+        if (detail.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: 0.4),
               ),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ),
+            child: MarkdownText(detail),
+          ),
+        ],
+        if (options.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          // 选项一列一行（标签 + 描述常显），回答按行展示，细节不丢失。
+          for (final o in options)
+            Builder(
+              builder: (context) {
+                final label = '${o['label'] ?? ''}';
+                final desc = '${o['description'] ?? ''}'.trim();
+                final isSel = selected.contains(label);
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSel
+                        ? Acc.green(context).withValues(alpha: 0.13)
+                        : scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isSel
+                          ? Acc.green(context).withValues(alpha: 0.5)
+                          : scheme.outlineVariant.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(
+                          multi
+                              ? (isSel
+                                    ? Icons.check_box
+                                    : Icons.check_box_outline_blank)
+                              : (isSel
+                                    ? Icons.radio_button_checked
+                                    : Icons.radio_button_unchecked),
+                          size: 13,
+                          color: isSel
+                              ? Acc.green(context)
+                              : scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              questionLabel(q, label),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontWeight: isSel ? FontWeight.w600 : null,
+                              ),
+                            ),
+                            if (desc.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 1),
+                                child: Text(
+                                  desc,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          if (multi)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                '（可多选）',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+        ],
+        if (!hasResult) ...[
+          const SizedBox(height: 6),
+          Text(
+            '等待回答…',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ] else if (!answered) ...[
+          const SizedBox(height: 6),
+          Text(
+            '（未作答）',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ] else if (selected.isEmpty && custom.isEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            '（已跳过）',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ] else ...[
+          // 回答一行一个：每条选项答案一行（含描述），自由填单独一行。
+          const SizedBox(height: 8),
+          for (final o in options)
+            if (selected.contains('${o['label']}')) ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.only(top: 1),
+                    child: Icon(
+                      Icons.check_circle,
+                      size: 13,
+                      color: Acc.green(context),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      questionLabel(q, '${o['label']}'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Acc.green(context),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if ('${o['description'] ?? ''}'.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 19, top: 1, bottom: 3),
+                  child: Text(
+                    '${o['description']}'.trim(),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+            ],
+          if (custom.isNotEmpty)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Padding(
                   padding: const EdgeInsets.only(top: 1),
                   child: Icon(
-                      multi
-                          ? (isSel
-                              ? Icons.check_box
-                              : Icons.check_box_outline_blank)
-                          : (isSel
-                              ? Icons.radio_button_checked
-                              : Icons.radio_button_unchecked),
-                      size: 13,
-                      color:
-                          isSel ? Acc.green(context) : scheme.onSurfaceVariant),
+                    Icons.short_text,
+                    size: 13,
+                    color: Acc.green(context),
+                  ),
                 ),
-                const SizedBox(width: 7),
+                const SizedBox(width: 6),
                 Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(questionLabel(q, label),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight:
-                                    isSel ? FontWeight.w600 : null)),
-                        if (desc.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 1),
-                            child: Text(desc,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                    color: scheme.onSurfaceVariant)),
-                          ),
-                      ]),
+                  child: Text(
+                    custom,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Acc.green(context),
+                    ),
+                  ),
                 ),
-              ]),
-            );
-          }),
-        if (multi)
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text('（可多选）',
-                style: theme.textTheme.labelSmall
-                    ?.copyWith(color: scheme.onSurfaceVariant)),
-          ),
-      ],
-      if (!hasResult) ...[
-        const SizedBox(height: 6),
-        Text('等待回答…',
-            style: theme.textTheme.labelSmall
-                ?.copyWith(color: scheme.onSurfaceVariant)),
-      ] else if (!answered) ...[
-        const SizedBox(height: 6),
-        Text('（未作答）',
-            style: theme.textTheme.labelSmall
-                ?.copyWith(color: scheme.onSurfaceVariant)),
-      ] else if (selected.isEmpty && custom.isEmpty) ...[
-        const SizedBox(height: 6),
-        Text('（已跳过）',
-            style: theme.textTheme.labelSmall
-                ?.copyWith(color: scheme.onSurfaceVariant)),
-      ] else ...[
-        // 回答一行一个：每条选项答案一行（含描述），自由填单独一行。
-        const SizedBox(height: 8),
-        for (final o in options)
-          if (selected.contains('${o['label']}')) ...[
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Padding(
-                padding: EdgeInsets.only(top: 1),
-                child:
-                    Icon(Icons.check_circle, size: 13, color: Acc.green(context)),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(questionLabel(q, '${o['label']}'),
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: Acc.green(context))),
-              ),
-            ]),
-            if ('${o['description'] ?? ''}'.trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 19, top: 1, bottom: 3),
-                child: Text('${o['description']}'.trim(),
-                    style: theme.textTheme.labelSmall
-                        ?.copyWith(color: scheme.onSurfaceVariant)),
-              ),
-          ],
-        if (custom.isNotEmpty)
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 1),
-              child: Icon(Icons.short_text,
-                  size: 13, color: Acc.green(context)),
+              ],
             ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(custom,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: Acc.green(context))),
-            ),
-          ]),
+        ],
       ],
-    ]);
+    );
   }
 
   Widget _copyIcon(String text) {
@@ -3171,11 +3646,19 @@ class _ToolCallCardState extends State<_ToolCallCard> {
       onTap: () async {
         await Clipboard.setData(ClipboardData(text: text));
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('已复制'), duration: Duration(seconds: 1)));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('已复制'),
+              duration: Duration(seconds: 1),
+            ),
+          );
         }
       },
-      child: Icon(Icons.copy, size: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+      child: Icon(
+        Icons.copy,
+        size: 12,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
     );
   }
 }
@@ -3197,34 +3680,47 @@ class _ReasoningFoldState extends State<_ReasoningFold> {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        InkWell(
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.psychology_outlined,
-                size: 13, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(width: 5),
-            Text(
-              _expanded ? '思考过程' : '思考过程（${widget.text.length} 字）',
-              style: theme.textTheme.labelSmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-            Icon(_expanded ? Icons.expand_less : Icons.expand_more,
-                size: 14, color: theme.colorScheme.onSurfaceVariant),
-          ]),
-        ),
-        if (_expanded)
-          Padding(
-            padding: const EdgeInsets.only(left: 18, top: 3),
-            child: Text(
-              widget.text,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                height: 1.5,
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.psychology_outlined,
+                  size: 13,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  _expanded ? '思考过程' : '思考过程（${widget.text.length} 字）',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                Icon(
+                  _expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 14,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ],
             ),
           ),
-      ]),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.only(left: 18, top: 3),
+              child: Text(
+                widget.text,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.5,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
