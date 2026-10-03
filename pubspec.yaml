@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.3.4+9
+version: 1.3.5+10
 
 environment:
   sdk: ^3.13.2
@@ -46,11 +46,14 @@ dependencies:
   path_provider: ^2.1.4  # 设备配对令牌（长效凭证）进系统安全存储（Keystore/Keychain）
   flutter_secure_storage: ^9.2.2
   # 扫码入网（转发/局域网二维码，相机 + 相册识别）
-  mobile_scanner: ^5.2.3
+  # 6.x：重写安卓相机栈并修 5.2.3 在无 GMS 国产 ROM 上的启动 NPE
+  mobile_scanner: ^6.0.11
   # 局域网自动发现（mDNS/NSD，_dsh._tcp）
   nsd: ^5.0.1
   file_picker: ^8.0.0
   scrollable_positioned_list: ^0.3.8
+  zxing2: 0.2.4
+  image: 4.10.1
 
 dev_dependencies:
   flutter_test:
