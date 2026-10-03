@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+
 /// 传输层抽象：上层（DshClient / DshMux）只认 request + openSocket，
 /// 直连局域网（DirectTransport）与云端转发（RelayTransport）可互换。
 abstract class DshTransport {
@@ -226,6 +228,9 @@ class RelayTransport extends DshTransport {
   // contentLength：200=全文长度 / 206=剩余长度 / 0=错误或 416（无载荷）
   final Map<String, void Function(int, int)?> _streamMeta = {};
   final Map<String, StreamController<String>> _sockets = {};
+
+  /// 建立中的隧道（rid → __open__ 哨兵完成器）：openSocket 等哨兵再返回
+  final Map<String, Completer<void>> _opening = {};
   final StreamController<Map<String, dynamic>> _events = StreamController.broadcast();
   bool _closed = false;
   bool _authFailed = false;
@@ -448,15 +453,27 @@ class RelayTransport extends DshTransport {
         }
         final c = _pending.remove(rid);
         c?.complete(frame);
+        // 隧道建立期的错误帧（如 bridge-ws-failed）：唤醒 openSocket 等待者
+        if (!(_opening[rid]?.isCompleted ?? true)) {
+          _opening.remove(rid)?.completeError(TransportException('${frame['code'] ?? 'relay/tunnel-error'}', '${frame['message'] ?? '隧道建立失败'}'));
+        }
         return;
       case 'ws-frame':
         final sc = _sockets['${frame['rid']}'];
         final text = frame['text'];
         // 桥以 __open__ 哨兵帧确认隧道建立
-        if (sc != null && text is String && text != '__open__') sc.add(text);
+        if (text is String && text == '__open__') {
+          _opening.remove('${frame['rid']}')?.complete();
+          return;
+        }
+        if (sc != null && text is String) {
+          debugPrint('[relay] << ws-frame rid=${frame['rid']} ${text.length > 110 ? text.substring(0, 110) : text}');
+          sc.add(text);
+        }
         return;
       case 'ws-close':
         final rid = '${frame['rid']}';
+        _opening.remove(rid)?.completeError(TransportException('relay/tunnel-closed', '隧道被桥关闭'));
         final sc = _sockets.remove(rid);
         sc?.close();
         return;
@@ -475,6 +492,11 @@ class RelayTransport extends DshTransport {
       c.complete({'type': 'error', 'code': 'relay/disconnected', 'message': 'relay 连接断开'});
     }
     _pending.clear();
+    // 建立中的隧道一并失败：openSocket 调用方（mux connect）走重试循环
+    for (final o in _opening.values) {
+      if (!o.isCompleted) o.completeError(TransportException('relay/disconnected', 'relay 连接断开'));
+    }
+    _opening.clear();
     _scheduleReconnect();
   }
 
@@ -508,6 +530,11 @@ class RelayTransport extends DshTransport {
   /// 隧道帧上行：在线直发；断线排队（重连后补发，溢出拆流重建）
   void _sendTunnelFrame(Map<String, dynamic> frame) {
     final msg = jsonEncode(frame);
+    assert(() {
+      final t = frame['text'];
+      debugPrint('[relay] >> ${frame['type']} rid=${frame['rid']} ${t is String ? (t.length > 110 ? t.substring(0, 110) : t) : ''}');
+      return true;
+    }());
     final ws = _ws;
     if (ws != null) {
       ws.add(msg);
@@ -639,12 +666,32 @@ class RelayTransport extends DshTransport {
     final rid = '${DateTime.now().microsecondsSinceEpoch}-s${_sockets.length}';
     final sc = StreamController<String>();
     _sockets[rid] = sc;
+    // 等桥的 __open__ 哨兵再返回：语义对齐 DirectTransport（返回即已建立）。
+    // 此前发完 ws-open 立即返回——上层立刻发出的首帧（如 mux open）会在桥
+    // 尚未完成宿主侧 WS 握手时到达，npm ws 在 CONNECTING 状态 send() 直接
+    // throw（不缓冲），帧被无声丢弃 → $events 流静默死亡（follow 因先走
+    // snapshot RPC 晚 ~50ms 侥幸存活）。
+    final opened = Completer<void>();
+    _opening[rid] = opened;
+    debugPrint('[relay] >> ws-open rid=$rid path=$path cookie=${headers['cookie'] != null}');
     ws.add(jsonEncode({
       'type': 'ws-open',
       'rid': rid,
       'path': path,
       'headers': headers,
     }));
+    try {
+      await opened.future.timeout(const Duration(seconds: 10), onTimeout: () {
+        throw TransportException('relay/tunnel-timeout', '隧道建立超时（桥无响应）');
+      });
+    } catch (e) {
+      _sockets.remove(rid);
+      _opening.remove(rid);
+      if (!sc.isClosed) sc.close();
+      rethrow;
+    } finally {
+      _opening.remove(rid);
+    }
     return _RelaySocket(this, rid, sc);
   }
 

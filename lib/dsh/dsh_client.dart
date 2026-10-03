@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
 import 'transport.dart';
 
 /// DSH 服务端协议客户端（传输层可插拔：直连 / 云端转发）。
@@ -538,6 +540,9 @@ Map<String, dynamic> sessionAddress({
 /// remote.mux 多路复用流客户端（传输层无关）。
 class DshMux {
   final DshClient client;
+
+  /// 日志标签（区分 follow / events 两路 mux）。
+  final String label;
   TransportSocket? _sock;
   final Map<String, StreamController<Map<String, dynamic>>> _streams = {};
   bool _closed = false;
@@ -549,7 +554,7 @@ class DshMux {
   /// 断线自动重连成功后的回调（上层用于自动重订阅逻辑流）。
   void Function()? onReconnected;
 
-  DshMux(this.client);
+  DshMux(this.client, {this.label = 'mux'});
 
   bool get isConnected => _sock != null;
 
@@ -563,6 +568,7 @@ class DshMux {
       headers: {if (client.cookie != null) 'cookie': client.cookie!},
     );
     _sock = sock;
+    debugPrint('[$label] ws opened');
     sock.messages.listen(
       (data) {
         Map<String, dynamic> msg;
@@ -617,12 +623,15 @@ class DshMux {
       return;
     }
     _connecting = true;
+    debugPrint('[$label] reconnect try (backoff=$_retryMs)');
     try {
       await connect();
       _retryMs = 2000; // 成功复位快档
       _reconnecting = false;
+      debugPrint('[$label] reconnect ok → onReconnected');
       onReconnected?.call(); // 上层自动重订阅（快照补齐增量，UI 自愈）
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[$label] reconnect fail: $e');
       _retryMs = (_retryMs * 2).clamp(2000, 15000); // 指数退避封顶 15s
       _reconnecting = false;
       _armRetry();

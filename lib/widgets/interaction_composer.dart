@@ -190,6 +190,14 @@ class _InteractionComposerState extends State<InteractionComposer> {
           setState(() => _page++);
         }
       });
+    } else if (!multi) {
+      // 单选末题：点选项即提交（与 web 端一致）。此前必须找到「提交回答」
+      // 按钮——键盘弹出/内容溢出时按钮被挤出屏幕，用户只能「跳过此题」。
+      Future.delayed(const Duration(milliseconds: 220), () {
+        if (mounted && !_busy && d.selected.contains(label)) {
+          _submit();
+        }
+      });
     }
   }
 

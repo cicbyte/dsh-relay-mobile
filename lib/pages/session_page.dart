@@ -173,7 +173,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this); // 回前台自动恢复（后台杀连接是常态）
-    _mux = DshMux(widget.client);
+    _mux = DshMux(widget.client, label: 'follow');
     InteractionCenter.I.ensureStarted(widget.client);
     _inputCtrl.addListener(_onInputChanged);
     _itemPositions.itemPositions.addListener(_onPositions);

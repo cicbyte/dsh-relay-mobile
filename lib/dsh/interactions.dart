@@ -63,14 +63,22 @@ class InteractionCenter {
     _client = client;
     _byId.clear();
     _notify();
-    final mux = DshMux(client);
+    debugPrint('[events] ensureStarted: create mux');
+    final mux = DshMux(client, label: 'events');
     _mux = mux;
-    mux.onReconnected = _openStream;
-    mux.connect().then((_) => _openStream()).catchError((_) {
+    mux.onReconnected = () {
+      debugPrint('[events] onReconnected → reopen stream');
+      _openStream();
+    };
+    mux.connect().then((_) {
+      debugPrint('[events] mux connect ok');
+      _openStream();
+    }).catchError((Object e) {
       // 初始连接失败：必须 kick 进持续重连循环（成功后 onReconnected 补开流）。
       // 此前静默吞掉——mux 从未建立时 _handleDisconnect 不会触发、无任何重试，
       // $events 永久躺平：follow 流（进会话页才连）照常收记录，于是
       // 「询问/计划以平铺卡片显示、但没有可交互的作答卡」。
+      debugPrint('[events] mux connect fail → kick: $e');
       mux.kick();
     });
   }
@@ -80,20 +88,29 @@ class InteractionCenter {
 
   void _openStream() {
     final mux = _mux;
-    if (mux == null || !mux.isConnected) return;
+    if (mux == null || !mux.isConnected) {
+      debugPrint('[events] openStream skip (null=${mux == null}, connected=${mux?.isConnected})');
+      return;
+    }
     _sub?.cancel();
     _sub = mux.open(r'$events', const {}).listen(
       _onItem,
-      onError: (_) {/* 流断开；重连后 onReconnected 补开，pending 由服务端补投 */},
+      onError: (Object e) {
+        // 流断开；重连后 onReconnected 补开，pending 由服务端补投
+        debugPrint('[events] stream error: $e');
+      },
       cancelOnError: false,
     );
+    debugPrint('[events] stream opened');
   }
 
   void _onItem(Map<String, dynamic> v) {
     switch (v['type']) {
       case 'ready':
         _clientId = '${v['clientId']}';
+        debugPrint('[events] ready clientId=$_clientId');
       case 'waterfall':
+        debugPrint("[events] waterfall ${v['event']} agent=${v['agentId']}");
         final id = '${v['eventId']}';
         if (id.isEmpty || id == 'null') return;
         _byId[id] = PendingInteraction(

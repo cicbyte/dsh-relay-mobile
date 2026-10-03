@@ -138,14 +138,14 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
         modeLabel = '云端转发 · ${p.name}';
       }
       final client = DshClient(transport);
-      if (!p.isRelay) {
-        // 直连自动重连也要鉴权：零手工令牌——经隧道向桥要本机 launch token
-        // 再换 cookie（与连接页手动流程一致）。缺了这步直连冷启动必 401。
-        try {
-          final launch = await client.fetchLaunchToken();
-          if (launch.isNotEmpty) await client.authorize(launch);
-        } catch (_) {/* 取不到就走原 401 报错路径 */}
-      }
+      // 自动重连也要鉴权（直连/云端转发都要）：launch-token 路由按「宿主本机
+      // 环回」放行——直连经 adb reverse 是环回；云端转发时该请求经桥在宿主
+      // 本机发起，同样环回。此前只给直连做了，relay 冷启动必 401
+      // （auth/required），每次打开 app 都得手动重连——作答卡/会话全挂。
+      try {
+        final launch = await client.fetchLaunchToken();
+        if (launch.isNotEmpty) await client.authorize(launch);
+      } catch (_) {/* 取不到就走原 401 报错路径 */}
       await client.sessionList(); // 连通性自检
       if (!mounted) {
         transport.close();
