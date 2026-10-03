@@ -23,10 +23,15 @@ class ConnectPage extends StatefulWidget {
     required DshTransport transport,
     required DshClient client,
     required String modeLabel,
-  }) onConnected;
+  })
+  onConnected;
   final VoidCallback onOpenDrawer;
 
-  const ConnectPage({super.key, required this.onConnected, required this.onOpenDrawer});
+  const ConnectPage({
+    super.key,
+    required this.onConnected,
+    required this.onOpenDrawer,
+  });
 
   @override
   State<ConnectPage> createState() => _ConnectPageState();
@@ -85,7 +90,8 @@ class _ConnectPageState extends State<ConnectPage> {
         transport = DirectTransport(Uri.parse(raw));
         modeLabel = '直连 · ${p.name}';
       } else {
-        if (p.relay.trim().isEmpty) throw TransportException('input/empty', '请填写 relay 地址');
+        if (p.relay.trim().isEmpty)
+          throw TransportException('input/empty', '请填写 relay 地址');
         final savedToken = await ProfileStore.tokenOf(p.id) ?? '';
         final relay = RelayTransport(
           Uri.parse(p.relay.trim()),
@@ -119,10 +125,15 @@ class _ConnectPageState extends State<ConnectPage> {
       p.lastError = '';
       await ProfileStore.save(_profiles);
       await ProfileStore.setActive(p.id);
-      await widget.onConnected(transport: transport, client: client, modeLabel: modeLabel);
+      await widget.onConnected(
+        transport: transport,
+        client: client,
+        modeLabel: modeLabel,
+      );
       // 连接成功即回会话页：onConnected 已切 tab 0，这里把本页弹出，
       // 不再让页面堆栈停在连接页要手动返回（2026-10-01 记录的 UX 瑕疵）
-      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+      if (mounted && Navigator.of(context).canPop())
+        Navigator.of(context).pop();
     } catch (e) {
       final msg = e is TransportException ? _friendlyError(e) : '$e';
       p.lastError = msg;
@@ -148,9 +159,8 @@ class _ConnectPageState extends State<ConnectPage> {
 
   // ---------------- 扫码 ----------------
   Future<void> _scan() async {
-    final raw = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const ScanPage()),
-    );
+    final raw = await Navigator.of(context)
+        .push<String>(MaterialPageRoute(builder: (_) => const ScanPage()));
     if (raw == null) return;
     await _applyPayload(raw);
   }
@@ -172,6 +182,21 @@ class _ConnectPageState extends State<ConnectPage> {
       url: t.relay ? 'http://127.0.0.1:3080' : t.addr,
       lanCode: t.lanCode,
     );
+    // 去重：同环境（转发=relay+房间；局域网=地址）已存在时不新建，
+    // 只刷新一次性配对码与环境名后直接连接，避免重复扫码堆积相同环境。
+    final key = EnvProfile.dedupKeyOf(p);
+    final dupIndex = _profiles.indexWhere(
+      (e) => EnvProfile.dedupKeyOf(e) == key,
+    );
+    if (dupIndex >= 0) {
+      final e = _profiles[dupIndex];
+      e.pairingCode = t.pairCode;
+      if (t.name.isNotEmpty) e.name = t.name;
+      await _saveAll();
+      setState(() => _activeId = e.id);
+      await _connect(e);
+      return;
+    }
     _profiles.add(p);
     await _saveAll();
     setState(() => _activeId = p.id);
@@ -220,9 +245,8 @@ class _ConnectPageState extends State<ConnectPage> {
     await ProfileStore.clearToken(p.id);
     await _saveAll();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已清除设备身份，请扫码或填新配对码重新配对')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已清除设备身份，请扫码或填新配对码重新配对')));
     }
   }
 
@@ -232,22 +256,24 @@ class _ConnectPageState extends State<ConnectPage> {
     return Scaffold(
       appBar: AppBar(
         flexibleSpace: Builder(builder: skinFlexibleSpace),
-        leading: Builder(builder: (context) {
-          // 作为设置页子路由 push 时显示返回，直接上屏时显示菜单
-          final canPop = Navigator.of(context).canPop();
-          return IconButton(
-            icon: Icon(canPop ? Icons.arrow_back : Icons.menu),
-            tooltip: canPop ? '返回' : '菜单',
-            onPressed: () {
-              final nav = Navigator.of(context);
-              if (nav.canPop()) {
-                nav.pop();
-              } else {
-                widget.onOpenDrawer();
-              }
-            },
-          );
-        }),
+        leading: Builder(
+          builder: (context) {
+            // 作为设置页子路由 push 时显示返回，直接上屏时显示菜单
+            final canPop = Navigator.of(context).canPop();
+            return IconButton(
+              icon: Icon(canPop ? Icons.arrow_back : Icons.menu),
+              tooltip: canPop ? '返回' : '菜单',
+              onPressed: () {
+                final nav = Navigator.of(context);
+                if (nav.canPop()) {
+                  nav.pop();
+                } else {
+                  widget.onOpenDrawer();
+                }
+              },
+            );
+          },
+        ),
         title: const Text('连接设置'),
         actions: [
           IconButton(
@@ -340,7 +366,9 @@ class _ConnectPageState extends State<ConnectPage> {
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: active ? scheme.primary : scheme.outlineVariant),
+        side: BorderSide(
+          color: active ? scheme.primary : scheme.outlineVariant,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
@@ -349,14 +377,24 @@ class _ConnectPageState extends State<ConnectPage> {
           children: [
             Row(
               children: [
-                Icon(p.isRelay ? Icons.cloud_outlined : Icons.lan, size: 18, color: scheme.primary),
+                Icon(
+                  p.isRelay ? Icons.cloud_outlined : Icons.lan,
+                  size: 18,
+                  color: scheme.primary,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(p.name, style: Theme.of(context).textTheme.titleSmall),
+                  child: Text(
+                    p.name,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
                 ),
                 if (p.isRelay)
                   Chip(
-                    label: Text(p.paired ? '已配对' : '未配对', style: const TextStyle(fontSize: 11)),
+                    label: Text(
+                      p.paired ? '已配对' : '未配对',
+                      style: const TextStyle(fontSize: 11),
+                    ),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
                     labelPadding: const EdgeInsets.symmetric(horizontal: 8),
@@ -373,7 +411,10 @@ class _ConnectPageState extends State<ConnectPage> {
             if (p.lastError.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Text(p.lastError, style: TextStyle(fontSize: 12, color: scheme.error)),
+                child: Text(
+                  p.lastError,
+                  style: TextStyle(fontSize: 12, color: scheme.error),
+                ),
               ),
             Row(
               children: [
@@ -381,9 +422,15 @@ class _ConnectPageState extends State<ConnectPage> {
                   onPressed: _busy ? null : () => _connect(p),
                   child: const Text('连接'),
                 ),
-                TextButton(onPressed: _busy ? null : () => _edit(p), child: const Text('编辑')),
+                TextButton(
+                  onPressed: _busy ? null : () => _edit(p),
+                  child: const Text('编辑'),
+                ),
                 if (p.isRelay && p.paired)
-                  TextButton(onPressed: _busy ? null : () => _repair(p), child: const Text('重新配对')),
+                  TextButton(
+                    onPressed: _busy ? null : () => _repair(p),
+                    child: const Text('重新配对'),
+                  ),
                 const Spacer(),
                 IconButton(
                   onPressed: _busy ? null : () => _delete(p),
@@ -448,9 +495,15 @@ class _EditSheetState extends State<_EditSheet> {
   }
 
   Future<void> _submit() async {
-    final p = widget.initial ??
-        EnvProfile(id: 'env-${DateTime.now().millisecondsSinceEpoch}', name: '');
-    p.name = _name.text.trim().isEmpty ? (p.name.isEmpty ? '新环境' : p.name) : _name.text.trim();
+    final p =
+        widget.initial ??
+        EnvProfile(
+          id: 'env-${DateTime.now().millisecondsSinceEpoch}',
+          name: '',
+        );
+    p.name = _name.text.trim().isEmpty
+        ? (p.name.isEmpty ? '新环境' : p.name)
+        : _name.text.trim();
     p.mode = _mode;
     p.url = _url.text.trim();
     p.lanCode = _lanCode.text.trim();
@@ -486,8 +539,10 @@ class _EditSheetState extends State<_EditSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.initial == null ? '新建环境' : '编辑环境',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              widget.initial == null ? '新建环境' : '编辑环境',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _name,
@@ -501,8 +556,16 @@ class _EditSheetState extends State<_EditSheet> {
             const SizedBox(height: 12),
             SegmentedButton<int>(
               segments: const [
-                ButtonSegment(value: 0, icon: Icon(Icons.lan), label: Text('局域网')),
-                ButtonSegment(value: 1, icon: Icon(Icons.cloud_outlined), label: Text('转发')),
+                ButtonSegment(
+                  value: 0,
+                  icon: Icon(Icons.lan),
+                  label: Text('局域网'),
+                ),
+                ButtonSegment(
+                  value: 1,
+                  icon: Icon(Icons.cloud_outlined),
+                  label: Text('转发'),
+                ),
               ],
               selected: {_mode},
               onSelectionChanged: (s) => setState(() => _mode = s.first),
@@ -631,12 +694,14 @@ class _DiscoverSheetState extends State<_DiscoverSheet> {
 
   Future<void> _pick(LanService s) async {
     final store = await ProfileStore.load();
-    store.add(EnvProfile(
-      id: 'env-${DateTime.now().millisecondsSinceEpoch}',
-      name: s.name,
-      mode: 0,
-      url: s.url,
-    ));
+    store.add(
+      EnvProfile(
+        id: 'env-${DateTime.now().millisecondsSinceEpoch}',
+        name: s.name,
+        mode: 0,
+        url: s.url,
+      ),
+    );
     await ProfileStore.save(store);
     if (mounted) Navigator.of(context).pop();
   }
@@ -651,10 +716,16 @@ class _DiscoverSheetState extends State<_DiscoverSheet> {
         children: [
           Text('局域网发现中…', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
-          Text('_dsh._tcp 服务广播（桌面 dsh 在同一 Wi-Fi 下）',
-              style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            '_dsh._tcp 服务广播（桌面 dsh 在同一 Wi-Fi 下）',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
           const SizedBox(height: 12),
-          if (_err != null) Text('发现失败：$_err', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          if (_err != null)
+            Text(
+              '发现失败：$_err',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           if (_found.isEmpty && _err == null)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 16),

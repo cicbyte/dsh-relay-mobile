@@ -53,33 +53,43 @@ class EnvProfile {
   /// 是否已有设备身份（转发模式下=已配对）
   bool get paired => deviceId.isNotEmpty;
 
+  /// 环境去重键：云端转发 = relay 地址 + 房间码；局域网 = 地址。
+  /// 同键视为同一环境（重复扫码/粘贴不应产生新环境）。
+  static String dedupKeyOf(EnvProfile e) {
+    String norm(String s) =>
+        s.trim().replaceAll(RegExp(r'/+$'), '').toLowerCase();
+    return e.mode == 1
+        ? 'r:${norm(e.relay)}|${e.roomCode.trim()}'
+        : 'l:${norm(e.url)}';
+  }
+
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'mode': mode,
-        'url': url,
-        'lanCode': lanCode,
-        'relay': relay,
-        'roomCode': roomCode,
-        'pairingCode': pairingCode,
-        'deviceId': deviceId,
-        'lastError': lastError,
-        'lastConnectedAt': lastConnectedAt,
-      };
+    'id': id,
+    'name': name,
+    'mode': mode,
+    'url': url,
+    'lanCode': lanCode,
+    'relay': relay,
+    'roomCode': roomCode,
+    'pairingCode': pairingCode,
+    'deviceId': deviceId,
+    'lastError': lastError,
+    'lastConnectedAt': lastConnectedAt,
+  };
 
   static EnvProfile fromJson(Map<String, dynamic> j) => EnvProfile(
-        id: '${j['id'] ?? ''}',
-        name: '${j['name'] ?? ''}',
-        mode: (j['mode'] as num? ?? 1).toInt(),
-        url: '${j['url'] ?? 'http://127.0.0.1:3080'}',
-        lanCode: '${j['lanCode'] ?? ''}',
-        relay: '${j['relay'] ?? 'ws://127.0.0.1:8787'}',
-        roomCode: '${j['roomCode'] ?? ''}',
-        pairingCode: '${j['pairingCode'] ?? ''}',
-        deviceId: '${j['deviceId'] ?? ''}',
-        lastError: '${j['lastError'] ?? ''}',
-        lastConnectedAt: (j['lastConnectedAt'] as num? ?? 0).toInt(),
-      );
+    id: '${j['id'] ?? ''}',
+    name: '${j['name'] ?? ''}',
+    mode: (j['mode'] as num? ?? 1).toInt(),
+    url: '${j['url'] ?? 'http://127.0.0.1:3080'}',
+    lanCode: '${j['lanCode'] ?? ''}',
+    relay: '${j['relay'] ?? 'ws://127.0.0.1:8787'}',
+    roomCode: '${j['roomCode'] ?? ''}',
+    pairingCode: '${j['pairingCode'] ?? ''}',
+    deviceId: '${j['deviceId'] ?? ''}',
+    lastError: '${j['lastError'] ?? ''}',
+    lastConnectedAt: (j['lastConnectedAt'] as num? ?? 0).toInt(),
+  );
 }
 
 /// 环境列表 + 活动环境 + 设备令牌的安全持久化。
@@ -110,16 +120,48 @@ class ProfileStore {
       return [prof];
     }
     try {
-      final list = (jsonDecode(raw) as List).whereType<Map>().map((e) => EnvProfile.fromJson(Map<String, dynamic>.from(e))).toList();
-      return list;
+      final list = (jsonDecode(raw) as List)
+          .whereType<Map>()
+          .map((e) => EnvProfile.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      return await dedupe(list);
     } catch (_) {
       return [];
     }
   }
 
+  /// 去重：同键环境只留一条（优先保留已配对的），被丢弃项清理设备令牌并回写。
+  /// 存量版本重复扫码会堆积完全相同的环境，升级后首次加载即清扫。
+  static Future<List<EnvProfile>> dedupe(List<EnvProfile> list) async {
+    final kept = <String, EnvProfile>{};
+    final drop = <EnvProfile>[];
+    for (final e in list) {
+      final key = EnvProfile.dedupKeyOf(e);
+      final cur = kept[key];
+      if (cur == null) {
+        kept[key] = e;
+      } else if (e.paired && !cur.paired) {
+        kept[key] = e;
+        drop.add(cur);
+      } else {
+        drop.add(e);
+      }
+    }
+    if (drop.isEmpty) return list;
+    for (final d in drop) {
+      await clearToken(d.id);
+    }
+    final result = list.where((e) => !drop.contains(e)).toList();
+    await save(result);
+    return result;
+  }
+
   static Future<void> save(List<EnvProfile> profiles) async {
     final p = await SharedPreferences.getInstance();
-    await p.setString(_kProfiles, jsonEncode(profiles.map((e) => e.toJson()).toList()));
+    await p.setString(
+      _kProfiles,
+      jsonEncode(profiles.map((e) => e.toJson()).toList()),
+    );
   }
 
   static Future<String?> activeId() async {
@@ -147,7 +189,9 @@ class ProfileStore {
     if (profileId.isEmpty) return;
     try {
       await _secure.write(key: _tokenKey(profileId), value: token);
-    } catch (_) {/* 平台不支持安全存储时静默：下次重新配对 */}
+    } catch (_) {
+      /* 平台不支持安全存储时静默：下次重新配对 */
+    }
   }
 
   /// 清除设备身份（重新配对）
