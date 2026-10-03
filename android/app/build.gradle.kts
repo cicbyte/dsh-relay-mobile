@@ -35,6 +35,12 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // R8 压缩会剥离 ML Kit 的反射目标：release 相机/图片识别全部
+            // 以 `getClass() on null` NPE 告终（google_mlkit/mobile_scanner
+            // 均未内置 consumer ProGuard 规则）。关闭压缩；日后若要恢复，
+            // 需补 `-keep class com.google.mlkit.** { *; }` 等 keep 规则。
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
