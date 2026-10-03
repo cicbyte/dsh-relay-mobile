@@ -1,4 +1,25 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// 后台保活开关（全局通知者）：连接期间挂前台服务常驻通知，
+/// Android 不冻结进程——切后台 relay/mux 连接照常跑，消息与交互实时到达。
+/// 启动时由 [KeepAliveStore.load] 修正初值（默认开）。
+final keepAliveNotifier = ValueNotifier<bool>(true);
+
+/// 后台保活偏好持久化（SharedPreferences，key=conn.keepAlive）。
+class KeepAliveStore {
+  static const _k = 'conn.keepAlive';
+
+  static Future<bool> load() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_k) ?? true; // 默认开：切后台仍工作是用户预期基线
+  }
+
+  static Future<void> save(bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_k, v);
+  }
+}
 
 /// 连接配置（持久化）。
 class ConnConfig {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'device_info.dart';
 import 'dsh/conn_store.dart';
 import 'dsh/dsh_client.dart';
 import 'dsh/interactions.dart';
@@ -36,11 +37,48 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   bool _sessionsLoading = false;
   bool _sessionRestored = false;
 
+  /// 已见交互 id（去重防重复通知；交互消失即移出）。
+  final Set<String> _seenInteractions = {};
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this); // 回前台自动恢复（后台杀连接是常态）
+    keepAliveNotifier.addListener(_syncKeepAlive);
+    InteractionCenter.I.pending.addListener(_onPendingChanged);
     _autoConnect();
+  }
+
+  /// 保活前台服务跟随连接与开关：连上且开关开 → 起；否则停。
+  /// 切换开关即时生效（设置页改 keepAliveNotifier 即触发）。
+  void _syncKeepAlive() {
+    if (_client != null && keepAliveNotifier.value) {
+      keepAliveStart();
+    } else {
+      keepAliveStop();
+    }
+  }
+
+  /// 后台新到交互（提问/授权）→ 系统通知点开直达；前台不弹（UI 已呈现卡）。
+  void _onPendingChanged() {
+    final list = InteractionCenter.I.pending.value;
+    final bg = WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed;
+    for (final p in list) {
+      final isNew = _seenInteractions.add(p.eventId);
+      if (isNew && bg) {
+        final kind = p.isQuestion ? '提问' : (p.isApproval ? '授权' : '交互');
+        var hint = '';
+        if (p.isQuestion && p.questions.isNotEmpty) {
+          final q = p.questions.first;
+          hint = '${q['header'] ?? q['title'] ?? ''}';
+        } else if (p.isApproval) {
+          hint = '${p.request['summary'] ?? p.request['action'] ?? ''}';
+        }
+        notifyEvent('DSH 需要$kind', hint.isEmpty ? '点开查看详情' : hint.trim());
+      }
+    }
+    // 已消失（取消/已答）的移出记录：同 id 再来仍算新事件
+    _seenInteractions.retainAll(list.map((e) => e.eventId).toSet());
   }
 
   /// 回前台自愈：刷新会话列表（后台期间的状态变化一次补齐）+ 唤醒全局事件流
@@ -115,6 +153,9 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    keepAliveNotifier.removeListener(_syncKeepAlive);
+    InteractionCenter.I.pending.removeListener(_onPendingChanged);
+    keepAliveStop();
     tabIndex.dispose();
     _transport?.close();
     super.dispose();
@@ -133,6 +174,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       _selected = null;
     });
     tabIndex.value = 0;
+    _syncKeepAlive(); // 连接即按开关起保活前台服务
     await refreshSessions();
   }
 

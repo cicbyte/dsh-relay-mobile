@@ -1,6 +1,8 @@
 package com.cicbyte.dsh_mobile
 
 import android.content.ContentValues
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -29,8 +31,54 @@ class MainActivity : FlutterActivity() {
                         Thread { saveToDownloads(File(src), name, result) }.start()
                     }
                 }
+                // 后台保活：起/停前台服务（常驻低优先级通知，进程不被冻结）
+                "keepAliveStart" -> {
+                    requestNotificationPermissionIfNeeded()
+                    try {
+                        startForegroundService(Intent(this, KeepAliveService::class.java))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("fgs-failed", e.message ?: e.toString(), null)
+                    }
+                }
+                "keepAliveStop" -> {
+                    stopService(Intent(this, KeepAliveService::class.java))
+                    result.success(true)
+                }
+                // 电池优化白名单（一次性系统弹窗；部分国产 ROM 另需手动允许自启动）
+                "requestBatteryExemption" -> {
+                    try {
+                        startActivity(Intent(
+                            android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            android.net.Uri.parse("package:$packageName")
+                        ))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("no-exemption", e.message ?: e.toString(), null)
+                    }
+                }
+                // 后台事件通知（回答完成/需要确认）：高优先级通道，点开直达
+                "notifyEvent" -> {
+                    val title = call.argument<String>("title") ?: "DSH"
+                    val text = call.argument<String>("text") ?: ""
+                    try {
+                        DshNotifier.notifyEvent(applicationContext, title, text)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("notify-failed", e.message ?: e.toString(), null)
+                    }
+                }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    /** Android 13+ 通知运行时权限（前台服务与事件通知可见性；拒绝也能跑，只是看不到） */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4701)
         }
     }
 

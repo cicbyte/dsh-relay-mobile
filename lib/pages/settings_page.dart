@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../device_info.dart';
+import '../dsh/conn_store.dart';
 import '../dsh/dsh_client.dart';
 import '../dsh/transport.dart';
 import '../theme.dart';
@@ -64,6 +66,29 @@ class SettingsPage extends StatelessWidget {
                   ));
                 },
               ),
+              // 后台保活（前台服务）：开关即时生效（AppRoot 监听 keepAliveNotifier）
+              ValueListenableBuilder<bool>(
+                valueListenable: keepAliveNotifier,
+                builder: (context, v, _) => SettingsTile(
+                  icon: Icons.bolt_outlined,
+                  title: '后台保持连接',
+                  subtitle: '切后台仍实时收消息/交互（常驻低优先级通知）',
+                  trailing: Switch(
+                    value: v,
+                    onChanged: (nv) async {
+                      keepAliveNotifier.value = nv;
+                      await KeepAliveStore.save(nv);
+                    },
+                  ),
+                ),
+              ),
+              SettingsTile(
+                icon: Icons.battery_saver_outlined,
+                title: '电池优化白名单',
+                subtitle: '减少系统杀后台；部分国产 ROM 另需允许自启动',
+                trailing: const Icon(Icons.chevron_right),
+                onTap: requestBatteryExemption,
+              ),
             ],
           ),
 
@@ -95,7 +120,7 @@ class SettingsPage extends StatelessWidget {
               SettingsTile(
                 icon: Icons.info_outline,
                 title: '版本',
-                trailing: _value(context, '1.2.1'),
+                trailing: _value(context, '1.3.0'),
               ),
               settingsDivider(context),
               SettingsTile(

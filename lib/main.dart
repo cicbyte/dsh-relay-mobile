@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import 'app_shell.dart';
+import 'dsh/conn_store.dart';
 import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final skin = await SkinStore.load();
+  keepAliveNotifier.value = await KeepAliveStore.load(); // 后台保活偏好（默认开）
   runApp(DshMobileApp(initialSkin: skin));
 }
 

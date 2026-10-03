@@ -3,6 +3,13 @@
     <!-- 扫码入网（mobile_scanner）；模拟器无相机时走相册识别 -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <!-- 后台保活前台服务：常驻低优先级通知，切后台连接不断 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <!-- Android 13+ 通知运行时权限（保活常驻条 + 事件通知可见） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- 电池优化白名单请求（设置页一键申请） -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <application
         android:label="dsh_mobile"
         android:name="${applicationName}"
@@ -30,6 +37,11 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 后台保活前台服务（dataSync 类型，API 29+ 声明要求） -->
+        <service
+            android:name=".KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

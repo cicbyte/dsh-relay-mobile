@@ -128,6 +128,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   /// 「深度求索中…」秒级刷新用。
   Timer? _ticker;
 
+  /// 上一帧的运行态（检测 运行→空闲 边沿，后台时弹完成通知）。
+  bool _wasRunning = false;
+
   /// 运行态：最后一条 turn/start 在最后一条 turn/end 之后（无轮次记录时回退 summary）。
   bool get _running {
     var lastStart = -1;
@@ -288,6 +291,19 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       }
     });
     _scrollToBottom();
+    _maybeNotifyTurnEnd(frame);
+  }
+
+  /// 后台回答完成通知：运行→空闲的边沿且 App 不在前台时弹系统通知
+  /// （前台 UI 本身可见，不打扰）。快照重放不触发（只认 event 帧）。
+  void _maybeNotifyTurnEnd(Map<String, dynamic> frame) {
+    final running = _running;
+    final finished = _wasRunning && !running;
+    _wasRunning = running;
+    if (!finished || frame['type'] != 'event') return;
+    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) return;
+    final title = _displayTitle(_records.values.toList());
+    notifyEvent('DSH 回答完成', title);
   }
 
   void _updateMinSeq() {
