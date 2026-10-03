@@ -2596,7 +2596,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                               ),
                           ],
                         ),
-                        padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+                        padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2675,19 +2675,21 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                   onPressed: _sending ? null : _pickReference,
                                 ),
                                 Tooltip(
-                                  message: '发送',
+                                  message: _running ? '停止当前轮' : '发送',
                                   child: Material(
                                     color: scheme.primary,
                                     shape: const CircleBorder(),
                                     child: InkWell(
                                       customBorder: const CircleBorder(),
-                                      onTap: _sending ? null : _send,
+                                      onTap: _sending
+                                          ? null
+                                          : (_running ? _cancel : _send),
                                       child: SizedBox(
-                                        width: 34,
-                                        height: 34,
+                                        width: 30,
+                                        height: 30,
                                         child: _sending
                                             ? const Padding(
-                                                padding: EdgeInsets.all(9),
+                                                padding: EdgeInsets.all(8),
                                                 child:
                                                     CircularProgressIndicator(
                                                       strokeWidth: 2,
@@ -2695,8 +2697,10 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                                     ),
                                               )
                                             : Icon(
-                                                Icons.arrow_upward,
-                                                size: 18,
+                                                _running
+                                                    ? Icons.stop
+                                                    : Icons.arrow_upward,
+                                                size: 17,
                                                 color: scheme.onPrimary,
                                               ),
                                       ),
