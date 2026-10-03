@@ -56,7 +56,14 @@ class DirectTransport extends DshTransport {
   @override
   Uri get downloadBase => base;
 
-  Uri _path(String p) => base.replace(path: p, query: null);
+  Uri _path(String p) {
+    // path 里可带 query（authorize 的 '/?token=…'）：必须拆开传给 replace，
+    // 否则 '?/=' 被当 path 字符转义成 %3F%3D，直连鉴权请求 404、换不到 cookie
+    // （relay 模式走隧道原样透传不经这里，故此前只有直连坏）。
+    final q = p.indexOf('?');
+    if (q < 0) return base.replace(path: p, query: null);
+    return base.replace(path: p.substring(0, q), query: p.substring(q + 1));
+  }
 
   @override
   Future<TransportResponse> request(
@@ -68,6 +75,9 @@ class DirectTransport extends DshTransport {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
     try {
       final req = await client.openUrl(method, _path(path));
+      // 不跟随 303：authorize 的 GET /?token= 靠 303 响应头的 Set-Cookie 换
+      // dsh-auth-*，默认自动跟随后 cookie 丢失 → 401（直连模式从未通过）。
+      req.followRedirects = false;
       headers.forEach(req.headers.set);
       // 用 UTF-8 字节写入：req.write(String) 默认 latin1 编码，请求体含
       // 中文时抛 "Invalid argument (string): Contains invalid characters."

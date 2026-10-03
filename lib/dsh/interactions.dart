@@ -67,7 +67,11 @@ class InteractionCenter {
     _mux = mux;
     mux.onReconnected = _openStream;
     mux.connect().then((_) => _openStream()).catchError((_) {
-      // 连接失败由 DshMux 的持续重连兜底；onReconnected 时补开流。
+      // 初始连接失败：必须 kick 进持续重连循环（成功后 onReconnected 补开流）。
+      // 此前静默吞掉——mux 从未建立时 _handleDisconnect 不会触发、无任何重试，
+      // $events 永久躺平：follow 流（进会话页才连）照常收记录，于是
+      // 「询问/计划以平铺卡片显示、但没有可交互的作答卡」。
+      mux.kick();
     });
   }
 

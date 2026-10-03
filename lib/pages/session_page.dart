@@ -221,6 +221,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       _openFollow();
     } catch (e) {
       setState(() => _error = '$e');
+      // 初始连接失败也进持续重连循环（成功后 onReconnected 自动补订阅），
+      // 不能只报错干等——那会退回「手动下拉重试」的旧体验。
+      _mux.kick();
     } finally {
       if (mounted) setState(() => _loading = false);
     }
