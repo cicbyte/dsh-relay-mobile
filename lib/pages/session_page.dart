@@ -2496,58 +2496,69 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           if (_hasMore)
             TextButton(onPressed: _loadEarlier, child: const Text('加载更早的消息')),
           Expanded(
-            child: _centerWidth(
-              _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : Builder(
-                      builder: (_) {
-                        final items = _buildItems(records);
-                        return Stack(
-                          children: [
-                            ScrollablePositionedList.builder(
-                              itemScrollController: _itemScrollCtrl,
-                              itemPositionsListener: _itemPositions,
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              itemCount: items.length,
-                              itemBuilder: (_, i) => items[i],
-                            ),
-                            // 轮次导航轨（≥2 轮才显示，对齐桌面）
-                            if (_turnItems.length >= 2)
-                              Positioned.fill(
-                                child: TurnRail(
-                                  items: _turnItems,
-                                  activeTurn: _activeTurn,
-                                  runningTurn: _running && _turnItems.isNotEmpty
-                                      ? _turnItems.last.turn
-                                      : null,
-                                  onJump: _jumpToTurn,
+            child: SafeArea(
+              top: false,
+              bottom: false,
+              child: _centerWidth(
+                _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : Builder(
+                        builder: (_) {
+                          final items = _buildItems(records);
+                          return Stack(
+                            children: [
+                              ScrollablePositionedList.builder(
+                                itemScrollController: _itemScrollCtrl,
+                                itemPositionsListener: _itemPositions,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
                                 ),
+                                itemCount: items.length,
+                                itemBuilder: (_, i) => items[i],
                               ),
-                          ],
-                        );
-                      },
-                    ),
+                              // 轮次导航轨（≥2 轮才显示，对齐桌面）
+                              if (_turnItems.length >= 2)
+                                Positioned.fill(
+                                  child: TurnRail(
+                                    items: _turnItems,
+                                    activeTurn: _activeTurn,
+                                    runningTurn:
+                                        _running && _turnItems.isNotEmpty
+                                        ? _turnItems.last.turn
+                                        : null,
+                                    onJump: _jumpToTurn,
+                                  ),
+                                ),
+                            ],
+                          );
+                        },
+                      ),
+              ),
             ),
           ),
           if (_running)
-            _centerWidth(
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 2, 14, 2),
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: 11,
-                      height: 11,
-                      child: CircularProgressIndicator(strokeWidth: 1.6),
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      '深度求索中… ${_elapsedLabel}',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
+            SafeArea(
+              top: false,
+              bottom: false,
+              child: _centerWidth(
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 2, 14, 2),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                        width: 11,
+                        height: 11,
+                        child: CircularProgressIndicator(strokeWidth: 1.6),
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 7),
+                      Text(
+                        '深度求索中… ${_elapsedLabel}',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -2564,9 +2575,10 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
               if (pending != null) {
                 // 与输入框同配方：普通子级 + 内容自适应。作答卡内部自己限高
                 // （键盘感知），保证提交按钮行永远可见。
-                return _centerWidth(
-                  SafeArea(
-                    child: InteractionComposer(
+                return SafeArea(
+                  top: false,
+                  child: _centerWidth(
+                    InteractionComposer(
                       interaction: pending,
                       onAnswer: (eventId, value) =>
                           InteractionCenter.I.answer(eventId, value),
@@ -2579,9 +2591,10 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
               }
               final scheme = Theme.of(context).colorScheme;
               final tk = Theme.of(context).extension<SkinTokens>()!;
-              return _centerWidth(
-                SafeArea(
-                  child: Padding(
+              return SafeArea(
+                top: false,
+                child: _centerWidth(
+                  Padding(
                     padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
