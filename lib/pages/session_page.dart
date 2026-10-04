@@ -229,6 +229,78 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     }
   }
 
+  /// 「+」展开面板（参考 WorkBuddy 收纳式输入框）：设置类（权限/计划/模型）
+  /// 与附件类（附件/共享区/提及）分组列出，选中即回。
+  Future<void> _showComposerMore() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.admin_panel_settings_outlined),
+              title: const Text('权限'),
+              trailing: Text(
+                _permissionPreset.isEmpty
+                    ? '默认'
+                    : _permissionLabel(_permissionPreset),
+              ),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickPermission();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.map_outlined),
+              title: const Text('计划模式'),
+              trailing: Text(_planActive ? '开' : '关'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _togglePlan();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.tune),
+              title: const Text('模型'),
+              trailing: Text(_modelLabel.isEmpty ? '默认' : _modelLabel),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickModel();
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.attach_file),
+              title: const Text('附件'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickFiles();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_shared_outlined),
+              title: const Text('共享文件区'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _startDownload();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.alternate_email),
+              title: const Text('提及文件或对话'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickReference();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 切后台时把保活通知刷成运行中进度；空闲则不动（保持「已连接」文案）。
   /// 标题不放耗时——通知右侧的系统秒表就是实时时间，两份时间会互相打架。
   void _syncBgProgressNotif() {
@@ -2718,144 +2790,120 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                 ),
                             ],
                           ),
-                          padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+                          padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              TextField(
-                                controller: _inputCtrl,
-                                minLines: 1,
-                                maxLines: 5,
-                                decoration: InputDecoration(
-                                  border: InputBorder.none,
-                                  isDense: true,
-                                  hintText: _placeholderText(),
-                                  hintMaxLines: 1,
-                                  hintStyle: TextStyle(
-                                    fontSize: 15,
-                                    color: scheme.onSurfaceVariant,
+                              // 生效中的设置 chip：仅在有激活项时出现（计划开 /
+                              // 权限非默认 / 模型非默认），平时零占位不干扰。
+                              if (_planActive ||
+                                  _permissionPreset.isNotEmpty ||
+                                  _modelLabel.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 4,
+                                    right: 4,
+                                    bottom: 6,
                                   ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    vertical: 8,
-                                  ),
-                                ),
-                                style: const TextStyle(fontSize: 15),
-                                onSubmitted: (_) => _send(),
-                              ),
-                              const SizedBox(height: 2),
-                              // 左右两组：左=权限/计划/模型 药丸，右=附件/共享区/提及/发送。
-                              // 宽屏（横屏/平板）左右分立贴边；窄屏左组自动换行不溢出。
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Flexible(
-                                    child: Wrap(
-                                      spacing: 4,
-                                      runSpacing: 4,
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      children: [
-                                        Tooltip(
-                                          message: _permissionPreset.isEmpty
-                                              ? '权限'
-                                              : '权限：${_permissionLabel(_permissionPreset)}',
-                                          child: _composerPill(
-                                            icon: Icons
-                                                .admin_panel_settings_outlined,
-                                            label: '权限',
-                                            active:
-                                                _permissionPreset.isNotEmpty,
-                                            onTap: _pickPermission,
-                                          ),
-                                        ),
-                                        Tooltip(
-                                          message: _planActive
-                                              ? '计划中（点击退出）'
-                                              : '计划',
-                                          child: _composerPill(
-                                            icon: Icons.map_outlined,
-                                            label: '计划',
-                                            active: _planActive,
-                                            onTap: _togglePlan,
-                                          ),
-                                        ),
-                                        Tooltip(
-                                          message: _modelLabel.isEmpty
-                                              ? '模型'
-                                              : '模型：$_modelLabel',
-                                          child: _composerPill(
-                                            icon: Icons.tune,
-                                            label: '模型',
-                                            active: _modelLabel.isNotEmpty,
-                                            onTap: _pickModel,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Wrap(
-                                    spacing: 4,
-                                    runSpacing: 4,
+                                  child: Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
                                     crossAxisAlignment:
                                         WrapCrossAlignment.center,
                                     children: [
-                                      _composerIcon(
-                                        icon: Icons.add_circle_outline,
-                                        tooltip: '附件',
-                                        onPressed: _sending ? null : _pickFiles,
-                                      ),
-                                      _composerIcon(
-                                        icon: Icons.folder_shared_outlined,
-                                        tooltip: '共享文件区',
-                                        onPressed: _startDownload,
-                                      ),
-                                      _composerIcon(
-                                        icon: Icons.alternate_email,
-                                        tooltip: '提及文件或对话',
-                                        onPressed: _sending
-                                            ? null
-                                            : _pickReference,
-                                      ),
-                                      Tooltip(
-                                        message: _running ? '停止当前轮' : '发送',
-                                        child: Material(
-                                          color: scheme.primary,
-                                          shape: const CircleBorder(),
-                                          child: InkWell(
-                                            customBorder: const CircleBorder(),
-                                            onTap: _sending
-                                                ? null
-                                                : (_running ? _cancel : _send),
-                                            child: SizedBox(
-                                              width: 30,
-                                              height: 30,
-                                              child: _sending
-                                                  ? const Padding(
-                                                      padding: EdgeInsets.all(
-                                                        8,
-                                                      ),
-                                                      child:
-                                                          CircularProgressIndicator(
-                                                            strokeWidth: 2,
-                                                            color: Colors.white,
-                                                          ),
-                                                    )
-                                                  : Icon(
-                                                      _running
-                                                          ? Icons.stop
-                                                          : Icons.arrow_upward,
-                                                      size: 17,
-                                                      color: scheme.onPrimary,
-                                                    ),
+                                      if (_planActive)
+                                        _composerPill(
+                                          icon: Icons.map_outlined,
+                                          label: '计划 · 开',
+                                          active: true,
+                                          onTap: _togglePlan,
+                                        ),
+                                      if (_permissionPreset.isNotEmpty)
+                                        _composerPill(
+                                          icon: Icons
+                                              .admin_panel_settings_outlined,
+                                          label:
+                                              '权限 · ${_permissionLabel(_permissionPreset)}',
+                                          active: true,
+                                          onTap: _pickPermission,
+                                        ),
+                                      if (_modelLabel.isNotEmpty)
+                                        _composerPill(
+                                          icon: Icons.tune,
+                                          label: '模型 · $_modelLabel',
+                                          active: true,
+                                          onTap: _pickModel,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              // 单行胶囊（参考 WorkBuddy）：+ 展开全部扩展，
+                              // 中间输入，右端发送/停止。
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  _composerIcon(
+                                    icon: Icons.add_circle_outline,
+                                    tooltip: '更多',
+                                    onPressed: _showComposerMore,
+                                  ),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _inputCtrl,
+                                      minLines: 1,
+                                      maxLines: 5,
+                                      decoration: InputDecoration(
+                                        border: InputBorder.none,
+                                        isDense: true,
+                                        hintText: _placeholderText(),
+                                        hintMaxLines: 1,
+                                        hintStyle: TextStyle(
+                                          fontSize: 15,
+                                          color: scheme.onSurfaceVariant,
+                                        ),
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              vertical: 8,
                                             ),
-                                          ),
+                                      ),
+                                      style: const TextStyle(fontSize: 15),
+                                      onSubmitted: (_) => _send(),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Tooltip(
+                                    message: _running ? '停止当前轮' : '发送',
+                                    child: Material(
+                                      color: scheme.primary,
+                                      shape: const CircleBorder(),
+                                      child: InkWell(
+                                        customBorder: const CircleBorder(),
+                                        onTap: _sending
+                                            ? null
+                                            : (_running ? _cancel : _send),
+                                        child: SizedBox(
+                                          width: 30,
+                                          height: 30,
+                                          child: _sending
+                                              ? const Padding(
+                                                  padding: EdgeInsets.all(8),
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                        color: Colors.white,
+                                                      ),
+                                                )
+                                              : Icon(
+                                                  _running
+                                                      ? Icons.stop
+                                                      : Icons.arrow_upward,
+                                                  size: 17,
+                                                  color: scheme.onPrimary,
+                                                ),
                                         ),
                                       ),
-                                    ],
+                                    ),
                                   ),
                                 ],
                               ),
