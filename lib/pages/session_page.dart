@@ -240,7 +240,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
 
   /// 常驻通知复位为「已连接」（回前台空闲 / 回合结束）
   void _restoreKeepNotif() {
-    keepAliveUpdate('DSH 已连接', '后台保持实时连接（消息/交互照常到达）');
+    keepAliveUpdate('DSH 已连接', '');
   }
 
   @override

@@ -48,11 +48,11 @@ class KeepAliveService : Service() {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
-                ID_KEEP, buildKeep(this, "DSH 已连接", "后台保持实时连接（消息/交互照常到达）", null, 0L),
+                ID_KEEP, buildKeep(this, "DSH 已连接", "", null, 0L),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             )
         } else {
-            startForeground(ID_KEEP, buildKeep(this, "DSH 已连接", "后台保持实时连接（消息/交互照常到达）", null, 0L))
+            startForeground(ID_KEEP, buildKeep(this, "DSH 已连接", "", null, 0L))
         }
     }
 
@@ -92,10 +92,10 @@ class KeepAliveService : Service() {
             builder
                 .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
                 .setContentTitle(title)
-                .setContentText(text)
                 .setOngoing(true)
                 .setContentIntent(pi)
                 .setOnlyAlertOnce(true)
+            if (text.isNotEmpty()) builder.setContentText(text)
             if (chronometerStartMs > 0L) {
                 // 系统秒表实时走字，无需 Dart 反复更新
                 builder.setUsesChronometer(true).setWhen(chronometerStartMs)
