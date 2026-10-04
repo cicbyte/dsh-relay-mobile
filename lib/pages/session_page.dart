@@ -2589,48 +2589,90 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           ),
         ),
         actions: [
-          // 计划模式指示 + 开关（对齐 web dsh-client-ui-plan）：
-          // 点按切 /plan on|off，状态随 plan/mode 事件点亮。
-          IconButton(
-            onPressed: _togglePlan,
-            tooltip: _planActive ? '计划模式 · 开（点按退出）' : '计划模式 · 关（点按开启）',
-            icon: Icon(
-              Icons.map_outlined,
-              color: _planActive ? Acc.lightBlue(context) : null,
-            ),
-          ),
+          // 主agent 快捷键（仅子agent 页出现）
           if (isSubagent && canPop)
             TextButton(
               onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
               child: const Text('主agent'),
             ),
-          IconButton(
-            onPressed: _showSubagents,
-            tooltip: '子agent',
-            icon: const Icon(Icons.account_tree_outlined),
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => TrajectoryPage(
-                  records: _sorted,
-                  title:
-                      '轨迹 · ${widget.summary.title.isEmpty ? widget.summary.sessionId : widget.summary.title}',
-                ),
+          // 停止当前轮：仅运行中显示（空闲时是死按钮，纯占位）。
+          // 红色调提示"打断中"，是运行期最重要的上下文动作。
+          if (_running)
+            IconButton(
+              onPressed: _cancel,
+              tooltip: '停止当前轮',
+              icon: Icon(
+                Icons.stop_circle_outlined,
+                color: Theme.of(context).colorScheme.error,
               ),
             ),
-            tooltip: '轨迹',
-            icon: const Icon(Icons.timeline),
-          ),
-          IconButton(
-            onPressed: _cancel,
-            tooltip: '停止当前轮',
-            icon: const Icon(Icons.stop_circle_outlined),
-          ),
-          IconButton(
-            onPressed: _start,
-            tooltip: '重新订阅',
-            icon: const Icon(Icons.refresh),
+          // 低频操作收进溢出菜单：计划模式开关在输入卡 + 面板里
+          // （激活时输入框上方有「计划 · 开」chip，状态不丢）。
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            icon: const Icon(Icons.more_vert),
+            onSelected: (v) {
+              switch (v) {
+                case 'subagents':
+                  _showSubagents();
+                case 'trajectory':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => TrajectoryPage(
+                        records: _sorted,
+                        title:
+                            '轨迹 · ${widget.summary.title.isEmpty ? widget.summary.sessionId : widget.summary.title}',
+                      ),
+                    ),
+                  );
+                case 'resubscribe':
+                  _start();
+                case 'plan':
+                  _togglePlan();
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'subagents',
+                child: ListTile(
+                  leading: const Icon(Icons.account_tree_outlined),
+                  title: const Text('子agent'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'trajectory',
+                child: ListTile(
+                  leading: const Icon(Icons.timeline),
+                  title: const Text('轨迹'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'plan',
+                child: ListTile(
+                  leading: const Icon(Icons.map_outlined),
+                  title: Text(_planActive ? '退出计划模式' : '计划模式'),
+                  trailing: _planActive
+                      ? Icon(Icons.check, color: Acc.lightBlue(context))
+                      : null,
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                ),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'resubscribe',
+                child: ListTile(
+                  leading: const Icon(Icons.refresh),
+                  title: const Text('重新订阅'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                ),
+              ),
+            ],
           ),
         ],
       ),
