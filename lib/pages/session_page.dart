@@ -2625,6 +2625,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                             // 左右两组：左=权限/计划/模型 药丸，右=附件/共享区/提及/发送。
                             // 宽屏（横屏/平板）左右分立贴边；窄屏左组自动换行不溢出。
                             Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
                                 Flexible(

@@ -120,7 +120,7 @@ class SettingsPage extends StatelessWidget {
               SettingsTile(
                 icon: Icons.info_outline,
                 title: '版本',
-                trailing: _value(context, '1.3.10'),
+                trailing: _value(context, '1.3.11'),
               ),
               settingsDivider(context),
               SettingsTile(
