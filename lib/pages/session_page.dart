@@ -196,7 +196,10 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     // 断线自动重连后自动重订阅（避免人工点重试）
     _mux.onReconnected = _openFollow;
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && _running) setState(() {});
+      if (!mounted || !_running) return;
+      setState(() {});
+      // 后台时把最新动作刷进进度通知（内容有变化才发，秒表由系统自己走）
+      _syncBgProgressTick();
     });
     _start();
   }
@@ -226,16 +229,68 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 切后台时把保活通知刷成运行中进度；空闲则不动（保持「已连接」文案）
+  /// 切后台时把保活通知刷成运行中进度；空闲则不动（保持「已连接」文案）。
+  /// 标题不放耗时——通知右侧的系统秒表就是实时时间，两份时间会互相打架。
   void _syncBgProgressNotif() {
     if (!_running) return;
-    final t = widget.summary.title.trim();
+    _lastNotifActivity = '';
+    _syncBgProgressTick();
+  }
+
+  /// 每秒 tick：后台时把「最新动作」刷进进度通知第二行，内容有变化才发
+  void _syncBgProgressTick() {
+    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      return;
+    }
+    final label = _latestActivityLabel();
+    if (label == _lastNotifActivity) return;
+    _lastNotifActivity = label;
     keepAliveUpdate(
-      '深度求索中… ${_elapsedLabel}',
-      t.isEmpty ? 'agent 正在处理，点开查看' : t,
+      '深度求索中…',
+      label,
       sessionId: widget.summary.sessionId,
       chronometerStartMs: _turnStartMs ?? 0,
     );
+  }
+
+  String _lastNotifActivity = '';
+
+  /// 最新动作短标签（后台进度通知第二行）：就近找最近一条
+  /// tool/call（工具名+参数摘要）或 assistant 文本/思考（回复中/思考中）；
+  /// 都没有时回退会话标题。
+  String _latestActivityLabel() {
+    final seqs = _records.keys.toList()..sort((a, b) => b.compareTo(a));
+    for (final seq in seqs.take(40)) {
+      final r = _records[seq]!;
+      switch (r.type) {
+        case 'tool/call':
+          final name = '${r.data['name'] ?? 'tool'}';
+          var detail = '${r.data['arguments'] ?? ''}'.replaceAll(
+            RegExp(r'\s+'),
+            ' ',
+          );
+          if (detail.length > 36) detail = '${detail.substring(0, 36)}…';
+          return detail.isEmpty ? '调用 $name' : '$name $detail';
+        case 'assistant/message':
+          final msg = Map<String, dynamic>.from(
+            r.data['message'] as Map? ?? {},
+          );
+          final blocks = (msg['content'] as List? ?? const []).toList();
+          for (final b in blocks.reversed) {
+            if (b is Map && b['type'] == 'thinking') return '思考中…';
+            if (b is Map && b['type'] == 'text') {
+              final t = '${b['text'] ?? ''}'.trim().replaceAll(
+                RegExp(r'\s+'),
+                ' ',
+              );
+              if (t.isNotEmpty) {
+                return t.length > 40 ? '回复中… ${t.substring(0, 40)}' : '回复中… $t';
+              }
+            }
+          }
+      }
+    }
+    return _displayTitle(_records.values.toList());
   }
 
   /// 常驻通知复位为「已连接」（回前台空闲 / 回合结束）
