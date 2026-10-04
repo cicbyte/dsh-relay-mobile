@@ -132,6 +132,19 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   /// 上一帧的运行态（检测 运行→空闲 边沿，后台时弹完成通知）。
   bool _wasRunning = false;
 
+  /// 宽屏（横屏/平板）内容限宽居中——消息列表与输入卡同宽，
+  /// 窄屏不加边距，行为与直铺一致。
+  Widget _centerWidth(Widget child) => LayoutBuilder(
+    builder: (context, c) {
+      final extra = c.maxWidth - 640.0;
+      if (extra <= 0) return child;
+      return Padding(
+        padding: EdgeInsets.symmetric(horizontal: extra / 2),
+        child: child,
+      );
+    },
+  );
+
   /// 运行态：最后一条 turn/start 在最后一条 turn/end 之后（无轮次记录时回退 summary）。
   bool get _running {
     var lastStart = -1;
@@ -2483,55 +2496,59 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           if (_hasMore)
             TextButton(onPressed: _loadEarlier, child: const Text('加载更早的消息')),
           Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : Builder(
-                    builder: (_) {
-                      final items = _buildItems(records);
-                      return Stack(
-                        children: [
-                          ScrollablePositionedList.builder(
-                            itemScrollController: _itemScrollCtrl,
-                            itemPositionsListener: _itemPositions,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            itemCount: items.length,
-                            itemBuilder: (_, i) => items[i],
-                          ),
-                          // 轮次导航轨（≥2 轮才显示，对齐桌面）
-                          if (_turnItems.length >= 2)
-                            Positioned.fill(
-                              child: TurnRail(
-                                items: _turnItems,
-                                activeTurn: _activeTurn,
-                                runningTurn: _running && _turnItems.isNotEmpty
-                                    ? _turnItems.last.turn
-                                    : null,
-                                onJump: _jumpToTurn,
-                              ),
+            child: _centerWidth(
+              _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : Builder(
+                      builder: (_) {
+                        final items = _buildItems(records);
+                        return Stack(
+                          children: [
+                            ScrollablePositionedList.builder(
+                              itemScrollController: _itemScrollCtrl,
+                              itemPositionsListener: _itemPositions,
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              itemCount: items.length,
+                              itemBuilder: (_, i) => items[i],
                             ),
-                        ],
-                      );
-                    },
-                  ),
+                            // 轮次导航轨（≥2 轮才显示，对齐桌面）
+                            if (_turnItems.length >= 2)
+                              Positioned.fill(
+                                child: TurnRail(
+                                  items: _turnItems,
+                                  activeTurn: _activeTurn,
+                                  runningTurn: _running && _turnItems.isNotEmpty
+                                      ? _turnItems.last.turn
+                                      : null,
+                                  onJump: _jumpToTurn,
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+            ),
           ),
           if (_running)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 2, 14, 2),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 11,
-                    height: 11,
-                    child: CircularProgressIndicator(strokeWidth: 1.6),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    '深度求索中… ${_elapsedLabel}',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
+            _centerWidth(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 2, 14, 2),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 11,
+                      height: 11,
+                      child: CircularProgressIndicator(strokeWidth: 1.6),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 7),
+                    Text(
+                      '深度求索中… ${_elapsedLabel}',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ValueListenableBuilder(
@@ -2547,195 +2564,204 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
               if (pending != null) {
                 // 与输入框同配方：普通子级 + 内容自适应。作答卡内部自己限高
                 // （键盘感知），保证提交按钮行永远可见。
-                return SafeArea(
-                  child: InteractionComposer(
-                    interaction: pending,
-                    onAnswer: (eventId, value) =>
-                        InteractionCenter.I.answer(eventId, value),
-                    onPass: (eventId) => InteractionCenter.I.pass(eventId),
-                    onDismiss: (eventId) =>
-                        InteractionCenter.I.dismiss(eventId),
+                return _centerWidth(
+                  SafeArea(
+                    child: InteractionComposer(
+                      interaction: pending,
+                      onAnswer: (eventId, value) =>
+                          InteractionCenter.I.answer(eventId, value),
+                      onPass: (eventId) => InteractionCenter.I.pass(eventId),
+                      onDismiss: (eventId) =>
+                          InteractionCenter.I.dismiss(eventId),
+                    ),
                   ),
                 );
               }
               final scheme = Theme.of(context).colorScheme;
               final tk = Theme.of(context).extension<SkinTokens>()!;
-              return SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // 附件条（选中待发，对齐桌面 conversation.input.attachments）
-                      if (_draftFiles.isNotEmpty) _attachmentStrip(),
-                      // 目标条（对齐桌面 GoalBar dock）
-                      if (_goalObjective.isNotEmpty) _goalDock(),
-                      // 队列 dock（对齐桌面 QueueDock：排队消息展示/撤/改/立即）
-                      if (_queueRows.isNotEmpty) _queueDock(),
-                      // 斜杠命令面板（/ 命令名 token 未敲完时浮出候选）
-                      if (_paletteQuery != null) _commandPalette(),
-                      // 输入卡（参考 DeepSeek 输入卡：大圆角卡、上文本区，
-                      // 下控制排——左图标+文字药丸，右圆钮[附件][提及][发送]）。
-                      // 装饰走皮肤令牌（换皮不换布局）
-                      Container(
-                        decoration: BoxDecoration(
-                          color: tk.composerFill,
-                          borderRadius: BorderRadius.circular(
-                            tk.composerRadius,
-                          ),
-                          border: tk.composerBorder == null
-                              ? null
-                              : Border.all(color: tk.composerBorder!),
-                          boxShadow: [
-                            if (tk.glowColor != null)
-                              BoxShadow(
-                                color: tk.glowColor!,
-                                blurRadius: 22,
-                                offset: const Offset(0, 6),
-                              ),
-                          ],
-                        ),
-                        padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            TextField(
-                              controller: _inputCtrl,
-                              minLines: 1,
-                              maxLines: 5,
-                              decoration: InputDecoration(
-                                border: InputBorder.none,
-                                isDense: true,
-                                hintText: _placeholderText(),
-                                hintMaxLines: 1,
-                                hintStyle: TextStyle(
-                                  fontSize: 15,
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 8,
-                                ),
-                              ),
-                              style: const TextStyle(fontSize: 15),
-                              onSubmitted: (_) => _send(),
+              return _centerWidth(
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // 附件条（选中待发，对齐桌面 conversation.input.attachments）
+                        if (_draftFiles.isNotEmpty) _attachmentStrip(),
+                        // 目标条（对齐桌面 GoalBar dock）
+                        if (_goalObjective.isNotEmpty) _goalDock(),
+                        // 队列 dock（对齐桌面 QueueDock：排队消息展示/撤/改/立即）
+                        if (_queueRows.isNotEmpty) _queueDock(),
+                        // 斜杠命令面板（/ 命令名 token 未敲完时浮出候选）
+                        if (_paletteQuery != null) _commandPalette(),
+                        // 输入卡（参考 DeepSeek 输入卡：大圆角卡、上文本区，
+                        // 下控制排——左图标+文字药丸，右圆钮[附件][提及][发送]）。
+                        // 装饰走皮肤令牌（换皮不换布局）
+                        Container(
+                          decoration: BoxDecoration(
+                            color: tk.composerFill,
+                            borderRadius: BorderRadius.circular(
+                              tk.composerRadius,
                             ),
-                            const SizedBox(height: 2),
-                            // 左右两组：左=权限/计划/模型 药丸，右=附件/共享区/提及/发送。
-                            // 宽屏（横屏/平板）左右分立贴边；窄屏左组自动换行不溢出。
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Flexible(
-                                  child: Wrap(
+                            border: tk.composerBorder == null
+                                ? null
+                                : Border.all(color: tk.composerBorder!),
+                            boxShadow: [
+                              if (tk.glowColor != null)
+                                BoxShadow(
+                                  color: tk.glowColor!,
+                                  blurRadius: 22,
+                                  offset: const Offset(0, 6),
+                                ),
+                            ],
+                          ),
+                          padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              TextField(
+                                controller: _inputCtrl,
+                                minLines: 1,
+                                maxLines: 5,
+                                decoration: InputDecoration(
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  hintText: _placeholderText(),
+                                  hintMaxLines: 1,
+                                  hintStyle: TextStyle(
+                                    fontSize: 15,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                ),
+                                style: const TextStyle(fontSize: 15),
+                                onSubmitted: (_) => _send(),
+                              ),
+                              const SizedBox(height: 2),
+                              // 左右两组：左=权限/计划/模型 药丸，右=附件/共享区/提及/发送。
+                              // 宽屏（横屏/平板）左右分立贴边；窄屏左组自动换行不溢出。
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Flexible(
+                                    child: Wrap(
+                                      spacing: 4,
+                                      runSpacing: 4,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: [
+                                        Tooltip(
+                                          message: _permissionPreset.isEmpty
+                                              ? '权限'
+                                              : '权限：${_permissionLabel(_permissionPreset)}',
+                                          child: _composerPill(
+                                            icon: Icons
+                                                .admin_panel_settings_outlined,
+                                            label: '权限',
+                                            active:
+                                                _permissionPreset.isNotEmpty,
+                                            onTap: _pickPermission,
+                                          ),
+                                        ),
+                                        Tooltip(
+                                          message: _planActive
+                                              ? '计划中（点击退出）'
+                                              : '计划',
+                                          child: _composerPill(
+                                            icon: Icons.map_outlined,
+                                            label: '计划',
+                                            active: _planActive,
+                                            onTap: _togglePlan,
+                                          ),
+                                        ),
+                                        Tooltip(
+                                          message: _modelLabel.isEmpty
+                                              ? '模型'
+                                              : '模型：$_modelLabel',
+                                          child: _composerPill(
+                                            icon: Icons.tune,
+                                            label: '模型',
+                                            active: _modelLabel.isNotEmpty,
+                                            onTap: _pickModel,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Wrap(
                                     spacing: 4,
                                     runSpacing: 4,
                                     crossAxisAlignment:
                                         WrapCrossAlignment.center,
                                     children: [
-                                      Tooltip(
-                                        message: _permissionPreset.isEmpty
-                                            ? '权限'
-                                            : '权限：${_permissionLabel(_permissionPreset)}',
-                                        child: _composerPill(
-                                          icon: Icons
-                                              .admin_panel_settings_outlined,
-                                          label: '权限',
-                                          active: _permissionPreset.isNotEmpty,
-                                          onTap: _pickPermission,
-                                        ),
+                                      _composerIcon(
+                                        icon: Icons.add_circle_outline,
+                                        tooltip: '附件',
+                                        onPressed: _sending ? null : _pickFiles,
+                                      ),
+                                      _composerIcon(
+                                        icon: Icons.folder_shared_outlined,
+                                        tooltip: '共享文件区',
+                                        onPressed: _startDownload,
+                                      ),
+                                      _composerIcon(
+                                        icon: Icons.alternate_email,
+                                        tooltip: '提及文件或对话',
+                                        onPressed: _sending
+                                            ? null
+                                            : _pickReference,
                                       ),
                                       Tooltip(
-                                        message: _planActive
-                                            ? '计划中（点击退出）'
-                                            : '计划',
-                                        child: _composerPill(
-                                          icon: Icons.map_outlined,
-                                          label: '计划',
-                                          active: _planActive,
-                                          onTap: _togglePlan,
-                                        ),
-                                      ),
-                                      Tooltip(
-                                        message: _modelLabel.isEmpty
-                                            ? '模型'
-                                            : '模型：$_modelLabel',
-                                        child: _composerPill(
-                                          icon: Icons.tune,
-                                          label: '模型',
-                                          active: _modelLabel.isNotEmpty,
-                                          onTap: _pickModel,
+                                        message: _running ? '停止当前轮' : '发送',
+                                        child: Material(
+                                          color: scheme.primary,
+                                          shape: const CircleBorder(),
+                                          child: InkWell(
+                                            customBorder: const CircleBorder(),
+                                            onTap: _sending
+                                                ? null
+                                                : (_running ? _cancel : _send),
+                                            child: SizedBox(
+                                              width: 30,
+                                              height: 30,
+                                              child: _sending
+                                                  ? const Padding(
+                                                      padding: EdgeInsets.all(
+                                                        8,
+                                                      ),
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            color: Colors.white,
+                                                          ),
+                                                    )
+                                                  : Icon(
+                                                      _running
+                                                          ? Icons.stop
+                                                          : Icons.arrow_upward,
+                                                      size: 17,
+                                                      color: scheme.onPrimary,
+                                                    ),
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ],
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                Wrap(
-                                  spacing: 4,
-                                  runSpacing: 4,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  children: [
-                                    _composerIcon(
-                                      icon: Icons.add_circle_outline,
-                                      tooltip: '附件',
-                                      onPressed: _sending ? null : _pickFiles,
-                                    ),
-                                    _composerIcon(
-                                      icon: Icons.folder_shared_outlined,
-                                      tooltip: '共享文件区',
-                                      onPressed: _startDownload,
-                                    ),
-                                    _composerIcon(
-                                      icon: Icons.alternate_email,
-                                      tooltip: '提及文件或对话',
-                                      onPressed: _sending
-                                          ? null
-                                          : _pickReference,
-                                    ),
-                                    Tooltip(
-                                      message: _running ? '停止当前轮' : '发送',
-                                      child: Material(
-                                        color: scheme.primary,
-                                        shape: const CircleBorder(),
-                                        child: InkWell(
-                                          customBorder: const CircleBorder(),
-                                          onTap: _sending
-                                              ? null
-                                              : (_running ? _cancel : _send),
-                                          child: SizedBox(
-                                            width: 30,
-                                            height: 30,
-                                            child: _sending
-                                                ? const Padding(
-                                                    padding: EdgeInsets.all(8),
-                                                    child:
-                                                        CircularProgressIndicator(
-                                                          strokeWidth: 2,
-                                                          color: Colors.white,
-                                                        ),
-                                                  )
-                                                : Icon(
-                                                    _running
-                                                        ? Icons.stop
-                                                        : Icons.arrow_upward,
-                                                    size: 17,
-                                                    color: scheme.onPrimary,
-                                                  ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ],
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               );
