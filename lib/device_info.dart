@@ -55,12 +55,48 @@ Future<void> requestBatteryExemption() async {
 }
 
 /// 后台事件通知（回答完成/需要确认）：高优先级通道，点开直达 App。
-/// 前台时不要调用（UI 内已呈现）。失败静默。
-Future<void> notifyEvent(String title, String text) async {
+/// 携 sessionId 时点开直达对应会话页。前台时不要调用（UI 内已呈现）。失败静默。
+Future<void> notifyEvent(String title, String text, {String? sessionId}) async {
   try {
     await _deviceChannel.invokeMethod<bool>('notifyEvent', {
       'title': title,
       'text': text,
+      if (sessionId != null) 'sessionId': sessionId,
     });
   } catch (_) {}
 }
+
+/// 更新保活常驻通知为运行中进度（系统秒表从 chronometerStartMs 实时走字，
+/// 无需反复刷新）；前台服务没在跑时原生侧静默忽略。回前台/回合结束传
+/// 复位文案（chronometerStartMs=0 关秒表）。
+Future<void> keepAliveUpdate(
+  String title,
+  String text, {
+  String? sessionId,
+  int chronometerStartMs = 0,
+}) async {
+  try {
+    await _deviceChannel.invokeMethod<bool>('keepAliveUpdate', {
+      'title': title,
+      'text': text,
+      if (sessionId != null) 'sessionId': sessionId,
+      'chronometerStartMs': chronometerStartMs,
+    });
+  } catch (_) {}
+}
+
+/// 原生事件（通知点开直达会话页等）。app_shell 初始化时注册一次。
+void setDshNativeEventHandler(
+  Future<void> Function(String method, Map<dynamic, dynamic> args)? handler,
+) {
+  _eventChannel.setMethodCallHandler(
+    handler == null
+        ? null
+        : (call) async {
+            final args = call.arguments as Map?;
+            await handler(call.method, args ?? const {});
+          },
+  );
+}
+
+const MethodChannel _eventChannel = MethodChannel('dsh/notify');

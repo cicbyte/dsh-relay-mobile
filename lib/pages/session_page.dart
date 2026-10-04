@@ -203,15 +203,44 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
 
   /// 回前台自愈：连接活着就重订阅拿最新快照（按 seq 合并不跳滚动）；
   /// 断了就立即 kick 重连（不等退避定时器），成功后 onReconnected 自动补订阅。
+  ///
+  /// 切后台 + agent 运行中：把常驻通知刷成「深度求索中… · 任务名」（系统秒表
+  /// 实时走字，灵动岛式观感）；回前台复位为普通连接保持文案。前台不需要——
+  /// 用户正看着页面，通知反而打扰。
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || !mounted) return;
-    if (_mux.isConnected) {
-      _openFollow();
-    } else {
-      if (_error == null) setState(() => _error = '连接中断，自动重连中…');
-      _mux.kick();
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _syncBgProgressNotif();
+      return;
     }
+    if (state == AppLifecycleState.resumed) {
+      if (mounted && !_running) _restoreKeepNotif();
+      if (!mounted) return;
+      if (_mux.isConnected) {
+        _openFollow();
+      } else {
+        if (_error == null) setState(() => _error = '连接中断，自动重连中…');
+        _mux.kick();
+      }
+    }
+  }
+
+  /// 切后台时把保活通知刷成运行中进度；空闲则不动（保持「已连接」文案）
+  void _syncBgProgressNotif() {
+    if (!_running) return;
+    final t = widget.summary.title.trim();
+    keepAliveUpdate(
+      '深度求索中… ${_elapsedLabel}',
+      t.isEmpty ? 'agent 正在处理，点开查看' : t,
+      sessionId: widget.summary.sessionId,
+      chronometerStartMs: _turnStartMs ?? 0,
+    );
+  }
+
+  /// 常驻通知复位为「已连接」（回前台空闲 / 回合结束）
+  void _restoreKeepNotif() {
+    keepAliveUpdate('DSH 已连接', '后台保持实时连接（消息/交互照常到达）');
   }
 
   @override
@@ -333,11 +362,16 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     final running = _running;
     final finished = _wasRunning && !running;
     _wasRunning = running;
-    if (!finished || frame['type'] != 'event') return;
+    if (!finished) {
+      // 运行中且在后台：秒表文案交给系统 chronometer 走字，无需反复更新
+      return;
+    }
+    _restoreKeepNotif(); // 回合结束：常驻通知从「深度求索中…」复位
+    if (frame['type'] != 'event') return;
     if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed)
       return;
     final title = _displayTitle(_records.values.toList());
-    notifyEvent('DSH 回答完成', title);
+    notifyEvent('DSH 回答完成', title, sessionId: widget.summary.sessionId);
   }
 
   void _updateMinSeq() {

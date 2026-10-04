@@ -14,8 +14,40 @@ import java.io.File
 import java.util.TimeZone
 
 class MainActivity : FlutterActivity() {
+    /** Dart↔原生事件通道（通知点开直达/深链会话页）；engine 未就绪时事件进缓冲 */
+    companion object {
+        var notifySink: MethodChannel? = null
+        val pendingEvents: ArrayDeque<Pair<String, Map<String, Any?>>> = ArrayDeque()
+
+        fun sendToDart(method: String, args: Map<String, Any?>) {
+            val ch = notifySink
+            if (ch != null) {
+                ch.invokeMethod(method, args)
+            } else {
+                if (pendingEvents.size > 16) pendingEvents.removeFirst()
+                pendingEvents.addLast(method to args)
+            }
+        }
+
+        fun flushPendingEvents() {
+            val ch = notifySink ?: return
+            while (pendingEvents.isNotEmpty()) {
+                val (m, a) = pendingEvents.removeFirst()
+                ch.invokeMethod(m, a)
+            }
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        notifySink = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dsh/notify")
+        // 冷启动带 dsh.sessionId（点通知杀进程后重开）：engine 就绪后转发
+        val cold = intent?.getStringExtra("dsh.sessionId")
+        if (!cold.isNullOrEmpty()) {
+            sendToDart("openSession", mapOf("sessionId" to cold))
+            intent?.removeExtra("dsh.sessionId")
+        }
+        flushPendingEvents()
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dsh/device").setMethodCallHandler { call, result ->
             when (call.method) {
                 // IANA 时区 ID（如 Asia/Shanghai）；session/prompt 的 clientTimeZone 只收这个
@@ -57,12 +89,26 @@ class MainActivity : FlutterActivity() {
                         result.error("no-exemption", e.message ?: e.toString(), null)
                     }
                 }
-                // 后台事件通知（回答完成/需要确认）：高优先级通道，点开直达
+                // 后台事件通知（回答完成/需要确认）：高优先级通道，点开直达会话页
                 "notifyEvent" -> {
                     val title = call.argument<String>("title") ?: "DSH"
                     val text = call.argument<String>("text") ?: ""
+                    val sessionId = call.argument<String>("sessionId")
                     try {
-                        DshNotifier.notifyEvent(applicationContext, title, text)
+                        DshNotifier.notifyEvent(applicationContext, title, text, sessionId)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("notify-failed", e.message ?: e.toString(), null)
+                    }
+                }
+                // 更新常驻通知为运行中进度（系统秒表走字）；服务没跑时静默忽略
+                "keepAliveUpdate" -> {
+                    val title = call.argument<String>("title") ?: "DSH 已连接"
+                    val text = call.argument<String>("text") ?: ""
+                    val sessionId = call.argument<String>("sessionId")
+                    val startMs = call.argument<Number>("chronometerStartMs")?.toLong() ?: 0L
+                    try {
+                        KeepAliveService.update(applicationContext, title, text, sessionId, startMs)
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("notify-failed", e.message ?: e.toString(), null)
@@ -70,6 +116,16 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    /** 通知点开（热启动）：转发 dsh.sessionId 到 Dart 打开对应会话页 */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val sid = intent.getStringExtra("dsh.sessionId")
+        if (!sid.isNullOrEmpty()) {
+            sendToDart("openSession", mapOf("sessionId" to sid))
+            intent.removeExtra("dsh.sessionId")
         }
     }
 

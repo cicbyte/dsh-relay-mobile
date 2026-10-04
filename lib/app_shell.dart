@@ -32,6 +32,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     final t = _transport;
     return t is RelayTransport ? t.deviceId : '';
   }
+
   List<SessionSummary> _sessions = [];
   SessionSummary? _selected;
   bool _sessionsLoading = false;
@@ -46,7 +47,26 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this); // 回前台自动恢复（后台杀连接是常态）
     keepAliveNotifier.addListener(_syncKeepAlive);
     InteractionCenter.I.pending.addListener(_onPendingChanged);
+    // 通知点开直达：原生把 dsh.sessionId 转发过来，选中对应会话并回到会话 tab
+    setDshNativeEventHandler(_onNativeEvent);
     _autoConnect();
+  }
+
+  /// 原生事件：openSession（点通知深链）
+  Future<void> _onNativeEvent(String method, Map<dynamic, dynamic> args) async {
+    if (method != 'openSession') return;
+    final sid = '${args['sessionId'] ?? ''}';
+    if (sid.isEmpty) return;
+    // 会话列表还没到（冷启动竞况）：刷一次，到了自然选中
+    if (_sessions.isEmpty && _client != null && !_sessionsLoading) {
+      await refreshSessions();
+    }
+    final hit = _sessions.where((s) => s.sessionId == sid).toList();
+    if (!mounted) return;
+    if (hit.isNotEmpty) {
+      setState(() => _selected = hit.first);
+    }
+    tabIndex.value = 0;
   }
 
   /// 保活前台服务跟随连接与开关：连上且开关开 → 起；否则停。
@@ -62,7 +82,8 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   /// 后台新到交互（提问/授权）→ 系统通知点开直达；前台不弹（UI 已呈现卡）。
   void _onPendingChanged() {
     final list = InteractionCenter.I.pending.value;
-    final bg = WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed;
+    final bg =
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed;
     for (final p in list) {
       final isNew = _seenInteractions.add(p.eventId);
       if (isNew && bg) {
@@ -74,7 +95,11 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
         } else if (p.isApproval) {
           hint = '${p.request['summary'] ?? p.request['action'] ?? ''}';
         }
-        notifyEvent('DSH 需要$kind', hint.isEmpty ? '点开查看详情' : hint.trim());
+        notifyEvent(
+          'DSH 需要$kind',
+          hint.isEmpty ? '点开查看详情' : hint.trim(),
+          sessionId: p.agentId,
+        );
       }
     }
     // 已消失（取消/已答）的移出记录：同 id 再来仍算新事件
@@ -107,8 +132,11 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
         break;
       }
     }
-    final p = picked ??
-        (profiles.isNotEmpty ? profiles.first : EnvProfile(id: 'default', name: '默认环境', mode: 0));
+    final p =
+        picked ??
+        (profiles.isNotEmpty
+            ? profiles.first
+            : EnvProfile(id: 'default', name: '默认环境', mode: 0));
     if (!mounted) return;
     try {
       final DshTransport transport;
@@ -145,13 +173,19 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       try {
         final launch = await client.fetchLaunchToken();
         if (launch.isNotEmpty) await client.authorize(launch);
-      } catch (_) {/* 取不到就走原 401 报错路径 */}
+      } catch (_) {
+        /* 取不到就走原 401 报错路径 */
+      }
       await client.sessionList(); // 连通性自检
       if (!mounted) {
         transport.close();
         return;
       }
-      await _onConnected(transport: transport, client: client, modeLabel: modeLabel);
+      await _onConnected(
+        transport: transport,
+        client: client,
+        modeLabel: modeLabel,
+      );
       debugPrint('[autoConnect] ok $modeLabel');
     } catch (e) {
       debugPrint('[autoConnect] fail: $e');
@@ -203,9 +237,11 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       if (!_sessionRestored) {
         _sessionRestored = true;
         final last = await ConnStore.lastSessionId();
-        debugPrint('[restore] items=${items.length} '
-            'ids=${items.map((e) => e.sessionId).take(3).toList()} '
-            'last=$last selected=${_selected?.sessionId} mounted=$mounted');
+        debugPrint(
+          '[restore] items=${items.length} '
+          'ids=${items.map((e) => e.sessionId).take(3).toList()} '
+          'last=$last selected=${_selected?.sessionId} mounted=$mounted',
+        );
         if (last != null && mounted && _selected == null) {
           for (final it in items) {
             if (it.sessionId == last) {
@@ -218,7 +254,8 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('刷新会话失败：$e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('刷新会话失败：$e')));
       }
     } finally {
       if (mounted) setState(() => _sessionsLoading = false);
@@ -246,12 +283,18 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       final cwd = await WorkspacePicker.show(context, client);
       if (cwd == null) return; // 取消
       final id = await client.sessionCreate(cwd: cwd.isEmpty ? null : cwd);
-      final s = SessionSummary(sessionId: id, title: '', running: true, blank: true);
+      final s = SessionSummary(
+        sessionId: id,
+        title: '',
+        running: true,
+        blank: true,
+      );
       selectSession(s);
       await refreshSessions();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('创建会话失败：$e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('创建会话失败：$e')));
       }
     }
   }
@@ -288,30 +331,33 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
               tabIndex.value = 0; // 设置页被拦截 → 回到上次 session
             },
             child: IndexedStack(
-            index: index,
-            children: [
-              client == null || _selected == null
-                  ? _EmptySessionView(
-                      connected: client != null,
-                      onOpenDrawer: () => rootScaffoldKey.currentState?.openDrawer(),
-                      onOpenSettings: () => tabIndex.value = 1,
-                    )
-                  : SessionPage(
-                      key: ValueKey(_selected!.sessionId),
-                      client: client,
-                      summary: _selected!,
-                      deviceId: _activeDeviceId,
-                      onOpenDrawer: () => rootScaffoldKey.currentState?.openDrawer(),
-                      onSessionEnded: refreshSessions,
-                    ),
-              SettingsPage(
-                onConnected: _onConnected,
-                onOpenDrawer: () => rootScaffoldKey.currentState?.openDrawer(),
-                modeLabel: _modeLabel,
-                connected: client != null,
-              ),
-            ],
-          ),
+              index: index,
+              children: [
+                client == null || _selected == null
+                    ? _EmptySessionView(
+                        connected: client != null,
+                        onOpenDrawer: () =>
+                            rootScaffoldKey.currentState?.openDrawer(),
+                        onOpenSettings: () => tabIndex.value = 1,
+                      )
+                    : SessionPage(
+                        key: ValueKey(_selected!.sessionId),
+                        client: client,
+                        summary: _selected!,
+                        deviceId: _activeDeviceId,
+                        onOpenDrawer: () =>
+                            rootScaffoldKey.currentState?.openDrawer(),
+                        onSessionEnded: refreshSessions,
+                      ),
+                SettingsPage(
+                  onConnected: _onConnected,
+                  onOpenDrawer: () =>
+                      rootScaffoldKey.currentState?.openDrawer(),
+                  modeLabel: _modeLabel,
+                  connected: client != null,
+                ),
+              ],
+            ),
           );
         },
       ),
@@ -369,12 +415,21 @@ class DshDrawer extends StatelessWidget {
             onTap: onTap,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
-              child: Row(children: [
-                Icon(icon, size: 22, color: onPanel),
-                const SizedBox(width: 12),
-                Expanded(child: Text(label, style: theme.textTheme.bodyLarge?.copyWith(color: onPanel))),
-                Icon(Icons.chevron_right, size: 20, color: onPanelDim),
-              ]),
+              child: Row(
+                children: [
+                  Icon(icon, size: 22, color: onPanel),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: onPanel,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, size: 20, color: onPanelDim),
+                ],
+              ),
             ),
           ),
         ),
@@ -390,85 +445,110 @@ class DshDrawer extends StatelessWidget {
           color: gradientPanel ? null : background,
         ),
         child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 顶部：连接状态 + 刷新
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 16, 10),
-              child: Row(children: [
-                Container(
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(
-                    color: connected ? Acc.green(context) : theme.colorScheme.error,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    connected ? 'DSH · 已连接' : '未连接',
-                    style: theme.textTheme.titleSmall?.copyWith(color: onPanel),
-                  ),
-                ),
-                IconButton(
-                  icon: Icon(Icons.refresh, size: 18, color: onPanelDim),
-                  onPressed: connected ? onRefresh : null,
-                ),
-              ]),
-            ),
-            entryRow(Icons.settings_outlined, '设置', onOpenSettings),
-            entryRow(Icons.add_comment_outlined, '新建会话', onNewSession),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Divider(height: 1),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
-              child: Text('会话',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(color: onPanelDim)),
-            ),
-            Expanded(
-              child: sessionsLoading && sessions.isEmpty
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(20),
-                        child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 顶部：连接状态 + 刷新
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 16, 10),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 9,
+                      height: 9,
+                      decoration: BoxDecoration(
+                        color: connected
+                            ? Acc.green(context)
+                            : theme.colorScheme.error,
+                        shape: BoxShape.circle,
                       ),
-                    )
-                  : sessions.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Text(connected ? '暂无会话' : '连接后显示会话列表',
-                                style: theme.textTheme.bodySmall),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        connected ? 'DSH · 已连接' : '未连接',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: onPanel,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.refresh, size: 18, color: onPanelDim),
+                      onPressed: connected ? onRefresh : null,
+                    ),
+                  ],
+                ),
+              ),
+              entryRow(Icons.settings_outlined, '设置', onOpenSettings),
+              entryRow(Icons.add_comment_outlined, '新建会话', onNewSession),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Divider(height: 1),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+                child: Text(
+                  '会话',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: onPanelDim,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: sessionsLoading && sessions.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          itemCount: sessions.length,
-                          itemBuilder: (context, i) {
-                            final s = sessions[i];
-                            final isSelected = selected?.sessionId == s.sessionId;
-                            return Material(
-                              color: isSelected
-                                  ? (gradientPanel
+                        ),
+                      )
+                    : sessions.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Text(
+                            connected ? '暂无会话' : '连接后显示会话列表',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        itemCount: sessions.length,
+                        itemBuilder: (context, i) {
+                          final s = sessions[i];
+                          final isSelected = selected?.sessionId == s.sessionId;
+                          return Material(
+                            color: isSelected
+                                ? (gradientPanel
                                       ? Colors.white.withValues(alpha: 0.18)
-                                      : theme.colorScheme.primary.withValues(alpha: 0.15))
-                                  : Colors.transparent,
+                                      : theme.colorScheme.primary.withValues(
+                                          alpha: 0.15,
+                                        ))
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                            child: InkWell(
                               borderRadius: BorderRadius.circular(10),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(10),
-                                onTap: () => onSelect(s),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                                  child: Row(children: [
+                              onTap: () => onSelect(s),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 9,
+                                ),
+                                child: Row(
+                                  children: [
                                     Icon(
-                                      s.running ? Icons.play_circle : Icons.chat_bubble_outline,
+                                      s.running
+                                          ? Icons.play_circle
+                                          : Icons.chat_bubble_outline,
                                       size: 18,
-                                      color: s.running ? Acc.green(context) : theme.colorScheme.onSurfaceVariant,
+                                      color: s.running
+                                          ? Acc.green(context)
+                                          : theme.colorScheme.onSurfaceVariant,
                                     ),
                                     const SizedBox(width: 10),
                                     Expanded(
@@ -476,35 +556,42 @@ class DshDrawer extends StatelessWidget {
                                         s.title.isEmpty ? '(未命名会话)' : s.title,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: theme.textTheme.bodyMedium?.copyWith(color: onPanel),
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(color: onPanel),
                                       ),
                                     ),
-                                  ]),
+                                  ],
                                 ),
                               ),
-                            );
-                          },
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              // 底部：连接方式身份行
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_outlined, size: 16, color: onPanelDim),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        modeLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: onPanelDim,
                         ),
-            ),
-            // 底部：连接方式身份行
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
-              child: Row(children: [
-                Icon(Icons.cloud_outlined, size: 16, color: onPanelDim),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(modeLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: onPanelDim)),
+                      ),
+                    ),
+                  ],
                 ),
-              ]),
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -527,7 +614,10 @@ class _EmptySessionView extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         flexibleSpace: Builder(builder: skinFlexibleSpace),
-        leading: IconButton(icon: const Icon(Icons.menu), onPressed: onOpenDrawer),
+        leading: IconButton(
+          icon: const Icon(Icons.menu),
+          onPressed: onOpenDrawer,
+        ),
         title: const Text('DSH Mobile'),
       ),
       body: Center(
@@ -536,16 +626,24 @@ class _EmptySessionView extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.forum_outlined, size: 56, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Icon(
+                Icons.forum_outlined,
+                size: 56,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
               const SizedBox(height: 16),
-              Text(connected ? '从侧边栏选择一个会话' : '先在「设置 → 连接」中连接 DSH',
-                  style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                connected ? '从侧边栏选择一个会话' : '先在「设置 → 连接」中连接 DSH',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
-              Text('点左上角菜单打开侧边栏',
-                  style: Theme.of(context).textTheme.bodySmall),
+              Text('点左上角菜单打开侧边栏', style: Theme.of(context).textTheme.bodySmall),
               if (!connected) ...[
                 const SizedBox(height: 16),
-                FilledButton(onPressed: onOpenSettings, child: const Text('去设置')),
+                FilledButton(
+                  onPressed: onOpenSettings,
+                  child: const Text('去设置'),
+                ),
               ],
             ],
           ),
