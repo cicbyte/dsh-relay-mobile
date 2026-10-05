@@ -301,6 +301,72 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     );
   }
 
+  /// 底部状态条（对齐桌面状态栏）：轮/步/tok·s/累计/缓存命中/上下文估算。
+  /// 全部由 follow 流已有记录推导（usage 字段随 turn 走），无额外请求；
+  /// 空会话（无轮无步）整条隐藏，不占视觉。
+  String _statusLine() {
+    int turns = 0, steps = 0;
+    int inTok = 0, outTok = 0, cacheTok = 0;
+    int? turnStartMs, lastMsgMs;
+    Map<String, dynamic> lastUsage = {};
+    for (final r in _records.values) {
+      switch (r.type) {
+        case 'turn/start':
+          turns++;
+          turnStartMs = r.time;
+        case 'tool/call':
+          steps++;
+        case 'assistant/message':
+          final u = Map<String, dynamic>.from(r.data['usage'] as Map? ?? {});
+          if (u.isEmpty) break;
+          inTok += (u['inputTokens'] as num? ?? 0).toInt();
+          outTok += (u['outputTokens'] as num? ?? 0).toInt();
+          // 缓存字段名各模型不同，取常见命名链兜底
+          cacheTok +=
+              ((u['cacheReadTokens'] ??
+                          u['cacheRead'] ??
+                          u['cachedTokens'] ??
+                          u['cachedInputTokens'] ??
+                          0)
+                      as num)
+                  .toInt();
+          lastUsage = u;
+          lastMsgMs = r.time;
+      }
+    }
+    if (turns == 0 && steps == 0) return '';
+    final parts = <String>['$turns 轮', '$steps 步'];
+    // tok/s：最近一条助手消息的输出量 / 该轮耗时（运行中按已流逝时间）
+    if (lastUsage.isNotEmpty && turnStartMs != null && lastMsgMs != null) {
+      final endMs = _running
+          ? DateTime.now().millisecondsSinceEpoch
+          : lastMsgMs;
+      final sec = ((endMs - turnStartMs) / 1000).clamp(1.0, 1 << 30).toDouble();
+      final tps = (lastUsage['outputTokens'] as num? ?? 0).toInt() / sec;
+      if (tps >= 1) parts.add('${tps.toStringAsFixed(0)} tok/s');
+    }
+    final total = inTok + outTok + cacheTok;
+    if (total > 0) parts.add('${_fmtTokens(total)} tok');
+    if (cacheTok > 0) {
+      final pct = (cacheTok / (cacheTok + inTok)).clamp(0.0, 1.0);
+      parts.add('缓存 ${(pct * 100).toStringAsFixed(0)}%');
+    }
+    // 上下文估算：最近一次用量三和（≈当前对话上下文体积）。窗口大小因模型
+    // 而异不硬编码，只给绝对值不给百分比。
+    final ctx =
+        (lastUsage['inputTokens'] as num? ?? 0).toInt() +
+        ((lastUsage['cacheReadTokens'] ??
+                    lastUsage['cacheRead'] ??
+                    lastUsage['cachedTokens'] ??
+                    lastUsage['cachedInputTokens'] ??
+                    0)
+                as num)
+            .toInt() +
+        (lastUsage['outputTokens'] as num? ?? 0).toInt();
+    if (ctx > 0) parts.add('上下文≈${_fmtTokens(ctx)}');
+    return parts.join(' · ');
+  }
+
   /// 切后台时把保活通知刷成运行中进度；空闲则不动（保持「已连接」文案）。
   /// 标题不放耗时——通知右侧的系统秒表就是实时时间，两份时间会互相打架。
   void _syncBgProgressNotif() {
@@ -2803,6 +2869,28 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        // 底部状态条（对齐桌面）：轮/步/tok·s/累计/缓存/上下文，
+                        // 由已订阅记录推导；空会话整条隐藏（零占位）。
+                        Builder(
+                          builder: (ctx) {
+                            final line = _statusLine();
+                            if (line.isEmpty) return const SizedBox.shrink();
+                            return Padding(
+                              padding: const EdgeInsets.only(
+                                left: 6,
+                                right: 6,
+                                bottom: 4,
+                              ),
+                              child: Text(
+                                line,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(color: scheme.onSurfaceVariant),
+                              ),
+                            );
+                          },
+                        ),
                         // 附件条（选中待发，对齐桌面 conversation.input.attachments）
                         if (_draftFiles.isNotEmpty) _attachmentStrip(),
                         // 目标条（对齐桌面 GoalBar dock）
@@ -3246,10 +3334,11 @@ String _fmtDuration(int ms) {
   return '${m}m${s.toString().padLeft(2, '0')}s';
 }
 
-/// token 数 → 「856」「4.6k」。
+/// token 数 → 「856」「4.6k」「5.4M」。
 String _fmtTokens(int n) {
   if (n < 1000) return '$n';
-  return '${(n / 1000).toStringAsFixed(1)}k';
+  if (n < 1000000) return '${(n / 1000).toStringAsFixed(1)}k';
+  return '${(n / 1000000).toStringAsFixed(1)}M';
 }
 
 /// 工具调用聚合条目（tool/call + tool/result 按 callId 配对）。
