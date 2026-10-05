@@ -202,6 +202,74 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       _syncBgProgressTick();
     });
     _start();
+    // 宿主投影控制流（session/control）：sessionStats/tokenUsage/contextPressure
+    // 的全量统计从这里实时下发（与桌面同源同口径），快照基线之外的增量也走它。
+    _startCtrlStream();
+  }
+
+  // ---- 宿主投影（权威统计，桌面状态条同源）----
+
+  /// 当前会话的投影值（key → value）。快照基线 + 控制流增量共同维护。
+  final Map<String, dynamic> _projValues = {};
+  DshMux? _ctrlMux;
+
+  void _startCtrlStream() async {
+    _ctrlMux = DshMux(widget.client, label: 'control');
+    _ctrlMux!.onReconnected = () {
+      _openCtrlStream();
+    };
+    try {
+      await _ctrlMux!.connect();
+      await _openCtrlStream();
+    } catch (_) {
+      // 控制流不可用（老版本宿主）：静默降级为记录折叠口径
+    }
+  }
+
+  Future<void> _openCtrlStream() async {
+    final mux = _ctrlMux;
+    if (mux == null) return;
+    mux.open('session/control', {}).listen(
+      (frame) {
+        final type = '${frame['type']}';
+        if (type == 'baseline') {
+          final value = frame['value'] as Map? ?? {};
+          // baseline.projections: {sessionId: {values: {...}}}
+          final projections = value['projections'] as Map? ?? {};
+          final mine = projections[widget.summary.sessionId] as Map?;
+          final values = mine?['values'] as Map? ?? mine;
+          if (values is Map) {
+            setState(() {
+              _projValues
+                ..clear()
+                ..addEntries(values.entries.map(
+                  (e) => MapEntry('${e.key}', e.value),
+                ));
+            });
+          }
+        } else if (type == 'projection') {
+          if ('${frame['sessionId']}' != widget.summary.sessionId) return;
+          final key = '${frame['key']}';
+          final value = frame['value'];
+          setState(() => _projValues[key] = value);
+        }
+      },
+      onError: (_) {}, // 断流由 mux 重连 + onReconnected 恢复
+      cancelOnError: false,
+    );
+  }
+
+  /// follow 快照携带的投影基线（宿主全量口径）
+  void _absorbProjections(dynamic projections) {
+    if (projections is! Map) return;
+    final values = projections['values'] as Map? ?? projections;
+    setState(() {
+      _projValues
+        ..clear()
+        ..addEntries(values.entries.map(
+          (e) => MapEntry('${e.key}', e.value),
+        ));
+    });
   }
 
   /// 回前台自愈：连接活着就重订阅拿最新快照（按 seq 合并不跳滚动）；
@@ -302,8 +370,48 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   }
 
   /// 会话统计（状态条 + 上下文详情面板共用）。
+  /// 优先取宿主投影（sessionStats/tokenUsage/contextPressure——与桌面状态条
+  /// 同源的全量口径，翻页/压缩不影响）；投影缺席（老版本宿主）回退记录折叠。
   _SessionStats _computeStats() {
     final s = _SessionStats();
+
+    // ---- 上下文压力投影：精确百分比（宿主知道模型窗口）----
+    final cp = _projValues['contextPressure'] as Map?;
+    if (cp != null) {
+      final used = (cp['projectedTokens'] ?? cp['pressureTokens']) as num?;
+      final win = cp['contextWindow'] as num?;
+      if (used != null) s.ctxTok = used.toInt();
+      if (win != null) s.ctxWindow = win.toInt();
+    }
+
+    // ---- token 记账投影：全量累计与缓存命中（桌面同式）----
+    final tu = _projValues['tokenUsage'] as Map?;
+    if (tu != null) {
+      final uncached = (tu['uncachedInputTokens'] as num? ?? 0).toInt();
+      final out = (tu['outputTokens'] as num? ?? 0).toInt();
+      final cRead = (tu['cacheReadTokens'] as num? ?? 0).toInt();
+      final cWrite = (tu['cacheWriteTokens'] as num? ?? 0).toInt();
+      s.inTok = uncached;
+      s.outTok = out;
+      s.cacheTok = cRead;
+      s.totalTok = uncached + cRead + cWrite + out;
+      final denom = uncached + cRead + cWrite;
+      if (denom > 0) s.cachePct = cRead / denom;
+    }
+
+    // ---- 会话统计投影：全量轮/步 + 解码吞吐（桌面 tok/s 同式）----
+    final ss = _projValues['sessionStats'] as Map?;
+    if (ss != null) {
+      s.turns = (ss['turns'] as num? ?? 0).toInt();
+      s.steps = (ss['steps'] as num? ?? 0).toInt();
+      final decodeMs = (ss['decodeMs'] as num? ?? 0).toInt();
+      final decodeTokens = (ss['decodeTokens'] as num? ?? 0).toInt();
+      if (decodeMs > 0) s.tps = decodeTokens / (decodeMs / 1000);
+      s.scopeFull = true;
+      return s;
+    }
+
+    // ---- 兜底：已加载窗口的记录折叠（桌面 deriveStats 同款兜底）----
     int? turnStartMs, lastMsgMs;
     Map<String, dynamic> lastUsage = {};
     for (final r in _records.values) {
@@ -331,6 +439,10 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           lastMsgMs = r.time;
       }
     }
+    if (s.totalTok == 0) s.totalTok = s.inTok + s.outTok + s.cacheTok;
+    if (s.cachePct == null && s.cacheTok > 0) {
+      s.cachePct = s.cacheTok / (s.cacheTok + s.inTok);
+    }
     // tok/s：最近一条助手消息的输出量 / 该轮耗时（运行中按已流逝时间）
     if (lastUsage.isNotEmpty && turnStartMs != null && lastMsgMs != null) {
       final endMs = _running
@@ -339,18 +451,18 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       final sec = ((endMs - turnStartMs) / 1000).clamp(1.0, 1 << 30).toDouble();
       s.tps = (lastUsage['outputTokens'] as num? ?? 0).toInt() / sec;
     }
-    // 上下文估算：最近一次用量三和（≈当前对话上下文体积，宿主侧系统提示词
-    // /工具定义未必全含，与桌面口径可能有出入——按估算呈现）。
-    s.ctxTok =
-        (lastUsage['inputTokens'] as num? ?? 0).toInt() +
-        ((lastUsage['cacheReadTokens'] ??
-                    lastUsage['cacheRead'] ??
-                    lastUsage['cachedTokens'] ??
-                    lastUsage['cachedInputTokens'] ??
-                    0)
-                as num)
-            .toInt() +
-        (lastUsage['outputTokens'] as num? ?? 0).toInt();
+    if (s.ctxTok == 0 && lastUsage.isNotEmpty) {
+      s.ctxTok =
+          (lastUsage['inputTokens'] as num? ?? 0).toInt() +
+          ((lastUsage['cacheReadTokens'] ??
+                      lastUsage['cacheRead'] ??
+                      lastUsage['cachedTokens'] ??
+                      lastUsage['cachedInputTokens'] ??
+                      0)
+                  as num)
+              .toInt() +
+          (lastUsage['outputTokens'] as num? ?? 0).toInt();
+    }
     return s;
   }
 
@@ -359,11 +471,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     if (s.turns == 0 && s.steps == 0) return '';
     final parts = <String>['${s.turns} 轮', '${s.steps} 步'];
     if (s.tps >= 1) parts.add('${s.tps.toStringAsFixed(0)} tok/s');
-    final total = s.inTok + s.outTok + s.cacheTok;
-    if (total > 0) parts.add('${_fmtTokens(total)} tok');
-    if (s.cacheTok > 0) {
-      final pct = (s.cacheTok / (s.cacheTok + s.inTok)).clamp(0.0, 1.0);
-      parts.add('缓存 ${(pct * 100).toStringAsFixed(0)}%');
+    if (s.totalTok > 0) parts.add('${_fmtTokens(s.totalTok)} tok');
+    if (s.cachePct != null) {
+      parts.add('缓存 ${(s.cachePct!.clamp(0.0, 1.0) * 100).toStringAsFixed(0)}%');
     }
     return parts.join(' · ');
   }
@@ -376,11 +486,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       builder: (sheetCtx) {
         final s = _computeStats();
         final scheme = Theme.of(sheetCtx).colorScheme;
-        final pct = (s.ctxTok / _ctxWindow).clamp(0.0, 1.0);
-        final total = s.inTok + s.outTok + s.cacheTok;
-        final cachePct = s.cacheTok > 0
-            ? (s.cacheTok / (s.cacheTok + s.inTok)).clamp(0.0, 1.0)
-            : 0.0;
+        final win = s.ctxWindow ?? _ctxWindow;
+        final pct = win > 0 ? (s.ctxTok / win).clamp(0.0, 1.0) : 0.0;
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -418,7 +525,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                   ?.copyWith(fontWeight: FontWeight.w600),
                             ),
                             Text(
-                              '${_fmtTokens(s.ctxTok)} / ${_fmtTokens(_ctxWindow)}',
+                              '${_fmtTokens(s.ctxTok)} / ${_fmtTokens(win)}',
                               style: Theme.of(sheetCtx).textTheme.labelSmall
                                   ?.copyWith(color: scheme.onSurfaceVariant),
                             ),
@@ -430,19 +537,25 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '上下文为最近一次模型用量估算；窗口按 262K 假设（宿主未下发模型窗口），与桌面口径可能略有出入。',
+                  s.ctxWindow != null
+                      ? '上下文占用与窗口均来自宿主实时下发，与桌面同源。'
+                      : '上下文为最近一次模型用量估算；窗口按 262K 假设（宿主未下发模型窗口），与桌面口径可能略有出入。',
                   textAlign: TextAlign.center,
                   style: Theme.of(sheetCtx).textTheme.labelSmall
                       ?.copyWith(color: scheme.onSurfaceVariant),
                 ),
                 const Divider(height: 24),
                 _ctxRow('轮次 / 步数', '${s.turns} 轮 · ${s.steps} 步'),
-                _ctxRow('累计 tokens', total > 0 ? _fmtTokens(total) : '—'),
-                if (s.cacheTok > 0)
-                  _ctxRow('缓存命中', '${(cachePct * 100).toStringAsFixed(0)}%'),
+                _ctxRow(
+                    '累计 tokens', s.totalTok > 0 ? _fmtTokens(s.totalTok) : '—'),
+                if (s.cachePct != null)
+                  _ctxRow(
+                      '缓存命中',
+                      '${(s.cachePct!.clamp(0.0, 1.0) * 100).toStringAsFixed(0)}%'),
                 if (s.tps >= 1)
                   _ctxRow('输出速度', '${s.tps.toStringAsFixed(0)} tok/s'),
-                _ctxRow('统计口径', '本机已加载窗口（非全量历史）'),
+                _ctxRow('统计口径',
+                    s.scopeFull ? '宿主全量投影（与桌面一致）' : '本机已加载窗口'),
               ],
             ),
           ),
@@ -547,6 +660,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
+    _ctrlMux?.close();
     _sub?.cancel();
     _controlSub?.cancel();
     _inputCtrl.removeListener(_onInputChanged);
@@ -634,6 +748,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             }
           }
           _updateMinSeq();
+          // 投影基线（宿主全量统计：sessionStats/tokenUsage/contextPressure…）
+          _absorbProjections(frame['projections']);
         case 'event':
           final e = frame['event'];
           if (e is Map) {
@@ -2985,8 +3101,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                             if (line.isEmpty && stats.ctxTok == 0) {
                               return const SizedBox.shrink();
                             }
-                            final ctxPct = _ctxWindow > 0
-                                ? (stats.ctxTok / _ctxWindow).clamp(0.0, 1.0)
+                            final win = stats.ctxWindow ?? _ctxWindow;
+                            final ctxPct = win > 0
+                                ? (stats.ctxTok / win).clamp(0.0, 1.0)
                                 : 0.0;
                             return Padding(
                               padding: const EdgeInsets.only(
@@ -3019,7 +3136,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       const SizedBox(width: 6),
-                                      // 上下文进度环：百分比 = 估算 / 窗口假设
+                                      // 上下文进度环：占用/窗口（宿主投影优先）
                                       SizedBox(
                                         width: 14,
                                         height: 14,
@@ -3504,11 +3621,23 @@ class _SessionStats {
   int outTok = 0;
   int cacheTok = 0;
 
-  /// 上下文估算（最近一次用量三和）
+  /// 累计 tokens（投影路径=计费输入+输出；兜底路径=in+out+cache）
+  int totalTok = 0;
+
+  /// 缓存命中率（投影路径=cacheRead/计费输入；兜底路径=cache/(cache+in)）
+  double? cachePct;
+
+  /// 上下文占用（投影=压力投影；兜底=最近一次用量三和）
   int ctxTok = 0;
 
-  /// 输出速度 tok/s（最近一轮）
+  /// 模型上下文窗口（宿主下发的真实值；null=未知，按 262K 估算）
+  int? ctxWindow;
+
+  /// 输出速度 tok/s（投影=全程解码吞吐；兜底=最近一轮）
   double tps = 0;
+
+  /// 投影在位（统计为宿主全量口径，与桌面一致）
+  bool scopeFull = false;
 }
 
 /// token 数 → 「856」「4.6k」「5.4M」。
