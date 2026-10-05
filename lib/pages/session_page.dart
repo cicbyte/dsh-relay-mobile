@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter/material.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
@@ -203,16 +202,6 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       _syncBgProgressTick();
     });
     _start();
-    _loadCtxWindow();
-  }
-
-  /// 读取持久化的上下文窗口假设（进度环百分比口径）
-  Future<void> _loadCtxWindow() async {
-    try {
-      final p = await SharedPreferences.getInstance();
-      final v = p.getInt('ctx.window');
-      if (v != null && v >= 4096 && mounted) setState(() => _ctxWindow = v);
-    } catch (_) {}
   }
 
   /// 回前台自愈：连接活着就重订阅拿最新快照（按 seq 合并不跳滚动）；
@@ -313,9 +302,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   }
 
   /// 会话统计（状态条 + 上下文详情面板共用）。
-  /// 注意：手机端默认只订阅最近窗口，「统计全部历史」补齐后才与桌面一致。
   _SessionStats _computeStats() {
-    final s = _SessionStats()..scopeFull = _statsFullScope;
+    final s = _SessionStats();
     int? turnStartMs, lastMsgMs;
     Map<String, dynamic> lastUsage = {};
     for (final r in _records.values) {
@@ -380,178 +368,86 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     return parts.join(' · ');
   }
 
-  /// 循环向前翻页拉全量历史（统计与桌面同口径）。有进度回调；防御性上限
-  /// 4000 页。结束后刷新 UI。
-  Future<void> _fetchAllHistory(void Function() onTick) async {
-    var guard = 0;
-    while (_hasMore && guard < 4000) {
-      guard++;
-      final before = _minSeq;
-      if (before == null) break;
-      try {
-        final v = await widget.client.rpc('session/page', {
-          'request': {
-            'address': _address,
-            'throughSeq': _cursor,
-            'beforeSeq': before,
-            'maxMessages': 200,
-          },
-        });
-        var added = 0;
-        for (final r in (v['records'] as List? ?? [])) {
-          if (r is Map) {
-            final rec = WireRecord.fromJson(Map<String, dynamic>.from(r));
-            if (!_records.containsKey(rec.seq)) added++;
-            _records.putIfAbsent(rec.seq, () => rec);
-          }
-        }
-        _hasMore = v['hasMore'] == true;
-        _updateMinSeq();
-        if (added == 0) break; // 无新增即到头（防御死循环）
-        onTick();
-      } catch (_) {
-        break; // 翻页失败就停在已加载范围
-      }
-    }
-    _statsFullScope = true;
-    if (mounted) setState(() {});
-  }
-
-  /// 上下文详情面板：大进度环 + 用量明细 + 窗口大小设置 + 统计全部历史。
+  /// 上下文详情面板：大进度环 + 用量明细 + 统计口径说明。
   Future<void> _showContextSheet() async {
-    final windowCtrl = TextEditingController(text: '$_ctxWindow');
-    var fetching = false;
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (sheetCtx) => StatefulBuilder(
-        builder: (sheetCtx, setSheetState) {
-          final s = _computeStats();
-          final scheme = Theme.of(sheetCtx).colorScheme;
-          final pct = _ctxWindow > 0
-              ? (s.ctxTok / _ctxWindow).clamp(0.0, 1.0)
-              : 0.0;
-          final total = s.inTok + s.outTok + s.cacheTok;
-          final cachePct = s.cacheTok > 0
-              ? (s.cacheTok / (s.cacheTok + s.inTok)).clamp(0.0, 1.0)
-              : 0.0;
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // 大进度环
-                  Center(
-                    child: SizedBox(
-                      width: 96,
-                      height: 96,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          SizedBox(
-                            width: 96,
-                            height: 96,
-                            child: CircularProgressIndicator(
-                              value: pct,
-                              strokeWidth: 8,
-                              strokeCap: StrokeCap.round,
-                              backgroundColor: scheme.outlineVariant,
-                              valueColor: AlwaysStoppedAnimation(
-                                pct > 0.85 ? scheme.error : scheme.primary,
-                              ),
+      builder: (sheetCtx) {
+        final s = _computeStats();
+        final scheme = Theme.of(sheetCtx).colorScheme;
+        final pct = (s.ctxTok / _ctxWindow).clamp(0.0, 1.0);
+        final total = s.inTok + s.outTok + s.cacheTok;
+        final cachePct = s.cacheTok > 0
+            ? (s.cacheTok / (s.cacheTok + s.inTok)).clamp(0.0, 1.0)
+            : 0.0;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 大进度环
+                Center(
+                  child: SizedBox(
+                    width: 96,
+                    height: 96,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SizedBox(
+                          width: 96,
+                          height: 96,
+                          child: CircularProgressIndicator(
+                            value: pct,
+                            strokeWidth: 8,
+                            strokeCap: StrokeCap.round,
+                            backgroundColor: scheme.outlineVariant,
+                            valueColor: AlwaysStoppedAnimation(
+                              pct > 0.85 ? scheme.error : scheme.primary,
                             ),
                           ),
-                          Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '${(pct * 100).toStringAsFixed(0)}%',
-                                style: Theme.of(sheetCtx).textTheme.titleLarge
-                                    ?.copyWith(fontWeight: FontWeight.w600),
-                              ),
-                              Text(
-                                '${_fmtTokens(s.ctxTok)} / ${_fmtTokens(_ctxWindow)}',
-                                style: Theme.of(sheetCtx).textTheme.labelSmall
-                                    ?.copyWith(color: scheme.onSurfaceVariant),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '上下文为最近一次模型用量估算（含宿主计入的系统提示词与工具定义），与桌面口径可能略有出入。',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(sheetCtx).textTheme.labelSmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                  const Divider(height: 24),
-                  _ctxRow('轮次 / 步数', '${s.turns} 轮 · ${s.steps} 步'),
-                  _ctxRow('累计 tokens', total > 0 ? _fmtTokens(total) : '—'),
-                  if (s.cacheTok > 0)
-                    _ctxRow('缓存命中', '${(cachePct * 100).toStringAsFixed(0)}%'),
-                  if (s.tps >= 1)
-                    _ctxRow('输出速度', '${s.tps.toStringAsFixed(0)} tok/s'),
-                  _ctxRow('统计范围', s.scopeFull ? '全部历史' : '已加载窗口（点下方按钮补齐）'),
-                  const Divider(height: 24),
-                  // 窗口大小设置（进度环百分比口径）
-                  Row(
-                    children: [
-                      Text(
-                        '上下文窗口',
-                        style: Theme.of(sheetCtx).textTheme.bodyMedium,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: windowCtrl,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            border: OutlineInputBorder(),
-                            suffixText: 'tokens',
-                          ),
-                          onSubmitted: (v) async {
-                            final n = int.tryParse(v) ?? 0;
-                            if (n < 4096) return;
-                            _ctxWindow = n;
-                            final p = await SharedPreferences.getInstance();
-                            await p.setInt('ctx.window', n);
-                            setSheetState(() {});
-                          },
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  if (!s.scopeFull)
-                    FilledButton.tonal(
-                      onPressed: fetching
-                          ? null
-                          : () async {
-                              setSheetState(() => fetching = true);
-                              await _fetchAllHistory(() {
-                                if (sheetCtx.mounted) setSheetState(() {});
-                              });
-                              if (sheetCtx.mounted) {
-                                setSheetState(() => fetching = false);
-                              }
-                            },
-                      child: Text(fetching ? '正在拉取全部历史…' : '统计全部历史（与桌面同步）'),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${(pct * 100).toStringAsFixed(0)}%',
+                              style: Theme.of(sheetCtx).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              '${_fmtTokens(s.ctxTok)} / ${_fmtTokens(_ctxWindow)}',
+                              style: Theme.of(sheetCtx).textTheme.labelSmall
+                                  ?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                ],
-              ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '上下文为最近一次模型用量估算；窗口按 262K 假设（宿主未下发模型窗口），与桌面口径可能略有出入。',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(sheetCtx).textTheme.labelSmall
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+                const Divider(height: 24),
+                _ctxRow('轮次 / 步数', '${s.turns} 轮 · ${s.steps} 步'),
+                _ctxRow('累计 tokens', total > 0 ? _fmtTokens(total) : '—'),
+                if (s.cacheTok > 0)
+                  _ctxRow('缓存命中', '${(cachePct * 100).toStringAsFixed(0)}%'),
+                if (s.tps >= 1)
+                  _ctxRow('输出速度', '${s.tps.toStringAsFixed(0)} tok/s'),
+                _ctxRow('统计口径', '本机已加载窗口（非全量历史）'),
+              ],
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -600,12 +496,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
 
   String _lastNotifActivity = '';
 
-  /// 统计范围标记：true=已翻页拉到全量历史（与桌面同口径）
-  bool _statsFullScope = false;
-
-  /// 上下文窗口假设（token）：进度环百分比=上下文估算/窗口。模型而异，
-  /// 默认 262K（当前主流大窗口），上下文详情面板里可改并持久化。
-  int _ctxWindow = 262144;
+  /// 上下文窗口假设（token）：进度环百分比=上下文估算/窗口。宿主未下发
+  /// 模型窗口，按当前主流大窗口 262K 内置假设，仅供量级参考，不暴露设置。
+  static const int _ctxWindow = 262144;
 
   /// 最新动作短标签（后台进度通知第二行）：就近找最近一条
   /// tool/call（工具名+参数摘要）或 assistant 文本/思考（回复中/思考中）；
@@ -3616,9 +3509,6 @@ class _SessionStats {
 
   /// 输出速度 tok/s（最近一轮）
   double tps = 0;
-
-  /// 统计范围是否已覆盖全部历史
-  bool scopeFull = false;
 }
 
 /// token 数 → 「856」「4.6k」「5.4M」。
