@@ -51,6 +51,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   int _cursor = 0;
   int? _minSeq;
   bool _hasMore = false;
+
+  /// 历史向前翻页在途（滚动到顶自动触发）
+  bool _loadingEarlier = false;
   bool _loading = true;
   bool _sending = false;
   String? _error;
@@ -819,11 +822,13 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 滚动跟随：可视区最靠上的行归属轮 = 当前轮（驱动轮次轨高亮）。
+  /// 滚动跟随：可视区最靠上的行归属轮 = 当前轮（驱动轮次轨高亮）；
+  /// 兼职驱动顶到头自动翻页。
   void _onPositions() {
     final now = DateTime.now();
     if (now.difference(_lastSpy).inMilliseconds < 150) return;
     _lastSpy = now;
+    _maybeAutoLoadEarlier();
     int? top;
     for (final p in _itemPositions.itemPositions.value) {
       if (p.itemLeadingEdge <= 0.15 && (top == null || p.index > top)) {
@@ -838,9 +843,20 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   }
 
   /// 向前翻一页历史：throughSeq=快照 cursor，beforeSeq=当前最老 seq。
+  /// 由滚动到顶自动触发（对齐桌面上滚加载）；prepend 后按锚点跳回原内容，
+  /// 视觉零跳动。
   Future<void> _loadEarlier() async {
     final before = _minSeq;
-    if (before == null) return;
+    if (before == null || _loadingEarlier) return;
+    int? anchorIdx;
+    var anchorEdge = 0.0;
+    for (final p in _itemPositions.itemPositions.value) {
+      if (anchorIdx == null || p.index < anchorIdx) {
+        anchorIdx = p.index;
+        anchorEdge = p.itemLeadingEdge;
+      }
+    }
+    setState(() => _loadingEarlier = true);
     try {
       final v = await widget.client.rpc('session/page', {
         'request': {
@@ -850,6 +866,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           'maxMessages': 50,
         },
       });
+      final oldCount = _itemCount;
       setState(() {
         for (final r in (v['records'] as List? ?? [])) {
           if (r is Map) {
@@ -861,11 +878,35 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         _hasMore = v['hasMore'] == true;
         _updateMinSeq();
       });
+      // 新记录 seq 更小、稳定排在前面：整体位移 = 新增条目数
+      final added = _itemCount - oldCount;
+      if (added > 0 && anchorIdx != null && _itemScrollCtrl.isAttached) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_itemScrollCtrl.isAttached) return;
+          _itemScrollCtrl.jumpTo(
+            index: (anchorIdx! + added).clamp(0, _itemCount - 1),
+            alignment: anchorEdge.clamp(0.0, 1.0),
+          );
+        });
+      }
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('翻页失败：$e')));
+    } finally {
+      if (mounted) setState(() => _loadingEarlier = false);
     }
+  }
+
+  /// 可视区顶到列表起始处 → 自动向前翻页（_onPositions 节流驱动）。
+  void _maybeAutoLoadEarlier() {
+    if (!_hasMore || _loadingEarlier || _loading) return;
+    var topMost = -1;
+    for (final p in _itemPositions.itemPositions.value) {
+      if (topMost == -1 || p.index < topMost) topMost = p.index;
+    }
+    if (topMost > 0) return;
+    _loadEarlier();
   }
 
   Future<void> _send() async {
@@ -2982,8 +3023,6 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                 ),
               ),
             ),
-          if (_hasMore)
-            TextButton(onPressed: _loadEarlier, child: const Text('加载更早的消息')),
           Expanded(
             child: SafeArea(
               top: false,
@@ -3005,6 +3044,22 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                 itemCount: items.length,
                                 itemBuilder: (_, i) => items[i],
                               ),
+                              // 上滚加载指示：浮层小 spinner，不占布局
+                              if (_loadingEarlier)
+                                const Positioned(
+                                  top: 10,
+                                  left: 0,
+                                  right: 0,
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.2,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               // 轮次导航轨（≥2 轮才显示，对齐桌面）
                               if (_turnItems.length >= 2)
                                 Positioned.fill(
