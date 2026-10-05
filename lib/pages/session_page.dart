@@ -2667,7 +2667,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                 value: 'resubscribe',
                 child: ListTile(
                   leading: const Icon(Icons.refresh),
-                  title: const Text('重新订阅'),
+                  title: const Text('刷新'),
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                 ),
