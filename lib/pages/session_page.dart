@@ -407,7 +407,6 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       final decodeMs = (ss['decodeMs'] as num? ?? 0).toInt();
       final decodeTokens = (ss['decodeTokens'] as num? ?? 0).toInt();
       if (decodeMs > 0) s.tps = decodeTokens / (decodeMs / 1000);
-      s.scopeFull = true;
       return s;
     }
 
@@ -478,7 +477,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     return parts.join(' · ');
   }
 
-  /// 上下文详情面板：大进度环 + 用量明细 + 统计口径说明。
+  /// 上下文详情面板：大进度环 + 用量明细。
   Future<void> _showContextSheet() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -535,15 +534,15 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                     ),
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  s.ctxWindow != null
-                      ? '上下文占用与窗口均来自宿主实时下发，与桌面同源。'
-                      : '上下文为最近一次模型用量估算；窗口按 262K 假设（宿主未下发模型窗口），与桌面口径可能略有出入。',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(sheetCtx).textTheme.labelSmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
+                if (s.ctxWindow == null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '上下文为最近一次模型用量估算；窗口按 262K 假设（宿主未下发模型窗口），与桌面口径可能略有出入。',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(sheetCtx).textTheme.labelSmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
                 const Divider(height: 24),
                 _ctxRow('轮次 / 步数', '${s.turns} 轮 · ${s.steps} 步'),
                 _ctxRow(
@@ -554,8 +553,6 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                       '${(s.cachePct!.clamp(0.0, 1.0) * 100).toStringAsFixed(0)}%'),
                 if (s.tps >= 1)
                   _ctxRow('输出速度', '${s.tps.toStringAsFixed(0)} tok/s'),
-                _ctxRow('统计口径',
-                    s.scopeFull ? '宿主全量投影（与桌面一致）' : '本机已加载窗口'),
               ],
             ),
           ),
@@ -3635,9 +3632,6 @@ class _SessionStats {
 
   /// 输出速度 tok/s（投影=全程解码吞吐；兜底=最近一轮）
   double tps = 0;
-
-  /// 投影在位（统计为宿主全量口径，与桌面一致）
-  bool scopeFull = false;
 }
 
 /// token 数 → 「856」「4.6k」「5.4M」。
