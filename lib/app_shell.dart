@@ -38,6 +38,19 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   bool _sessionsLoading = false;
   bool _sessionRestored = false;
 
+  // ---- 工作区分组（workspace/follow：桌面侧栏同源）----
+
+  /// 有序工作区（workspaceId/title/path/sessionIds）。
+  List<Map<String, dynamic>> _workspaces = [];
+
+  /// 宿主全局置顶/归档集（会话 id）。
+  Set<String> _pinnedIds = {};
+  Set<String> _archivedIds = {};
+
+  /// 抽屉组折叠状态（默认全展开）。
+  final Set<String> _collapsedGroups = {};
+  DshMux? _wsMux;
+
   /// 已见交互 id（去重防重复通知；交互消失即移出）。
   final Set<String> _seenInteractions = {};
 
@@ -199,6 +212,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     InteractionCenter.I.pending.removeListener(_onPendingChanged);
     keepAliveStop();
     tabIndex.dispose();
+    _wsMux?.close();
     _transport?.close();
     super.dispose();
   }
@@ -218,6 +232,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     tabIndex.value = 0;
     _syncKeepAlive(); // 连接即按开关起保活前台服务
     await refreshSessions();
+    _startWorkspaceFollow();
   }
 
   Future<void> refreshSessions() async {
@@ -270,6 +285,146 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     ConnStore.saveLastSessionId(s.sessionId);
   }
 
+  // ---- 工作区分组：workspace/follow（baseline + 增量推帧，桌面侧栏同源）----
+
+  void _startWorkspaceFollow() {
+    final client = _client;
+    if (client == null) return;
+    _wsMux?.close();
+    final mux = DshMux(client, label: 'workspace');
+    _wsMux = mux;
+    mux.onReconnected = _openWorkspaceFollow;
+    () async {
+      try {
+        await mux.connect();
+      } catch (e) {
+        debugPrint('[workspace] mux connect fail: $e');
+        return; // connect 失败也会走 mux 自动重连，成功后 onReconnected 补开流
+      }
+      _openWorkspaceFollow();
+    }();
+  }
+
+  Future<void> _openWorkspaceFollow() async {
+    final mux = _wsMux;
+    if (mux == null) return;
+    mux.open('workspace/follow', {}).listen(
+      (frame) {
+        final type = '${frame['type']}';
+        setState(() {
+          if (type == 'baseline') {
+            final v = frame['value'] as Map? ?? {};
+            _workspaces = (v['items'] as List? ?? [])
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList();
+            _archivedIds = _idSet(v['archivedSessionIds']);
+            _pinnedIds = _idSet(v['pinnedSessionIds']);
+          } else if (type == 'upsert') {
+            final w = frame['workspace'];
+            if (w is Map) {
+              final m = Map<String, dynamic>.from(w);
+              _workspaces.removeWhere(
+                (e) => '${e['workspaceId']}' == '${m['workspaceId']}',
+              );
+              _workspaces.add(m);
+            }
+          } else if (type == 'order') {
+            final ids = (frame['workspaceIds'] as List? ?? [])
+                .map((e) => '$e')
+                .toList();
+            int rank(Map e) {
+              final i = ids.indexOf('${e['workspaceId']}');
+              return i == -1 ? 1 << 30 : i;
+            }
+
+            _workspaces.sort((a, b) => rank(a).compareTo(rank(b)));
+          } else if (type == 'archived') {
+            _archivedIds = _idSet(frame['archivedSessionIds']);
+          } else if (type == 'pinned') {
+            _pinnedIds = _idSet(frame['pinnedSessionIds']);
+          } else if (type == 'remove') {
+            _workspaces.removeWhere(
+              (e) => '${e['workspaceId']}' == '${frame['workspaceId']}',
+            );
+          }
+        });
+      },
+      onError: (e) {
+        debugPrint('[workspace] follow stream error: $e');
+      },
+      cancelOnError: false,
+    );
+  }
+
+  Set<String> _idSet(dynamic v) =>
+      (v as List? ?? []).map((e) => '$e').toSet();
+
+  /// 工作区标题：title 优先，回退路径 basename（桌面 workspaceLabel 同义）。
+  String _wsLabel(Map w) {
+    final t = '${w['title']}';
+    if (t.isNotEmpty && t != 'null') return t;
+    final p = '${w['path']}'.replaceAll('\\', '/');
+    final base = p.split('/').where((x) => x.isNotEmpty).toList();
+    return base.isEmpty ? '工作区' : base.last;
+  }
+
+  List<_SessionSection> _sessionSections() {
+    List<SessionSummary> order(Iterable<SessionSummary> input) =>
+        input.toList()
+          ..sort((a, b) {
+            final pa = _pinnedIds.contains(a.sessionId);
+            final pb = _pinnedIds.contains(b.sessionId);
+            if (pa != pb) return pa ? -1 : 1;
+            return (b.updatedAt ?? 0).compareTo(a.updatedAt ?? 0);
+          });
+
+    final remaining = {
+      for (final s in _sessions) s.sessionId: s,
+    };
+    final sections = <_SessionSection>[];
+    for (final w in _workspaces) {
+      final members = <SessionSummary>[];
+      for (final id
+          in ((w['sessionIds'] as List? ?? []).map((e) => '$e'))) {
+        final s = remaining.remove(id);
+        if (s != null) members.add(s);
+      }
+      sections.add(
+        _SessionSection('${w['workspaceId']}', _wsLabel(w), order(members)),
+      );
+    }
+    if (remaining.isNotEmpty) {
+      sections.add(
+        _SessionSection('__ungrouped__', '未分组', order(remaining.values)),
+      );
+    }
+    return sections;
+  }
+
+  /// 长按会话行：置顶/归档（wire 写后 follow 推帧回刷 UI）。
+  Future<void> _rowAction(SessionSummary s, String action) async {
+    final client = _client;
+    if (client == null) return;
+    final pinned = _pinnedIds.contains(s.sessionId);
+    final archived = _archivedIds.contains(s.sessionId);
+    final method = switch (action) {
+      'pin' => pinned ? 'workspace/unpinSession' : 'workspace/pinSession',
+      'archive' =>
+        archived ? 'workspace/unarchiveSession' : 'workspace/archiveSession',
+      _ => null,
+    };
+    if (method == null) return;
+    try {
+      await client.rpc(method, {'request': {'sessionId': s.sessionId}});
+    } catch (e) {
+      debugPrint('[workspace] $method fail: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('操作失败：$e')));
+    }
+  }
+
   Future<void> createSession() async {
     final client = _client;
     if (client == null) {
@@ -310,7 +465,54 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
         modeLabel: _modeLabel,
         connected: client != null,
         selected: _selected,
+        sections: _sessionSections(),
+        pinnedIds: _pinnedIds,
+        archivedIds: _archivedIds,
+        collapsedGroups: _collapsedGroups,
         onSelect: selectSession,
+        onToggleGroup: (key) => setState(() {
+          if (!_collapsedGroups.remove(key)) _collapsedGroups.add(key);
+        }),
+        onRowMenu: (s) async {
+          final archived = _archivedIds.contains(s.sessionId);
+          final pinned = _pinnedIds.contains(s.sessionId);
+          final action = await showModalBottomSheet<String>(
+            context: context,
+            builder: (sheetCtx) => SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: Icon(
+                      pinned ? Icons.push_pin_outlined : Icons.push_pin,
+                    ),
+                    title: Text(pinned ? '取消置顶' : '置顶'),
+                    onTap: () => Navigator.pop(sheetCtx, 'pin'),
+                  ),
+                  ListTile(
+                    leading: Icon(
+                      archived ? Icons.unarchive : Icons.archive_outlined,
+                    ),
+                    title: Text(archived ? '取消归档' : '归档'),
+                    onTap: () => Navigator.pop(sheetCtx, 'archive'),
+                  ),
+                ],
+              ),
+            ),
+          );
+          if (action != null) await _rowAction(s, action);
+        },
+        onArchivedTap: (s) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('该会话已归档（桌面端归档集）'),
+              action: SnackBarAction(
+                label: '恢复',
+                onPressed: () => _rowAction(s, 'archive'),
+              ),
+            ),
+          );
+        },
         onRefresh: refreshSessions,
         onNewSession: createSession,
         onOpenSettings: () {
@@ -373,7 +575,16 @@ class DshDrawer extends StatelessWidget {
   final String modeLabel;
   final bool connected;
   final SessionSummary? selected;
+
+  /// 工作区分组视图（桌面侧栏同源）：工作区组 + 未分组，组内置顶优先。
+  final List<_SessionSection> sections;
+  final Set<String> pinnedIds;
+  final Set<String> archivedIds;
+  final Set<String> collapsedGroups;
   final void Function(SessionSummary) onSelect;
+  final void Function(String) onToggleGroup;
+  final Future<void> Function(SessionSummary) onRowMenu;
+  final void Function(SessionSummary) onArchivedTap;
   final VoidCallback onRefresh;
   final VoidCallback onNewSession;
   final VoidCallback onOpenSettings;
@@ -385,7 +596,14 @@ class DshDrawer extends StatelessWidget {
     required this.modeLabel,
     required this.connected,
     required this.selected,
+    required this.sections,
+    required this.pinnedIds,
+    required this.archivedIds,
+    required this.collapsedGroups,
     required this.onSelect,
+    required this.onToggleGroup,
+    required this.onRowMenu,
+    required this.onArchivedTap,
     required this.onRefresh,
     required this.onNewSession,
     required this.onOpenSettings,
@@ -516,56 +734,19 @@ class DshDrawer extends StatelessWidget {
                           ),
                         ),
                       )
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        itemCount: sessions.length,
-                        itemBuilder: (context, i) {
-                          final s = sessions[i];
-                          final isSelected = selected?.sessionId == s.sessionId;
-                          return Material(
-                            color: isSelected
-                                ? (gradientPanel
-                                      ? Colors.white.withValues(alpha: 0.18)
-                                      : theme.colorScheme.primary.withValues(
-                                          alpha: 0.15,
-                                        ))
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(10),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(10),
-                              onTap: () => onSelect(s),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 9,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      s.running
-                                          ? Icons.play_circle
-                                          : Icons.chat_bubble_outline,
-                                      size: 18,
-                                      color: s.running
-                                          ? Acc.green(context)
-                                          : theme.colorScheme.onSurfaceVariant,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        s.title.isEmpty ? '(未命名会话)' : s.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: theme.textTheme.bodyMedium
-                                            ?.copyWith(color: onPanel),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
+                    : _DrawerList(
+                        sections: sections,
+                        pinnedIds: pinnedIds,
+                        archivedIds: archivedIds,
+                        collapsedGroups: collapsedGroups,
+                        selected: selected,
+                        gradientPanel: gradientPanel,
+                        onPanel: onPanel,
+                        onPanelDim: onPanelDim,
+                        onSelect: onSelect,
+                        onToggleGroup: onToggleGroup,
+                        onRowMenu: onRowMenu,
+                        onArchivedTap: onArchivedTap,
                       ),
               ),
               // 底部：连接方式身份行
@@ -594,6 +775,149 @@ class DshDrawer extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 抽屉会话分组段（工作区组 / 未组段）。
+class _SessionSection {
+  final String key;
+  final String label;
+  final List<SessionSummary> sessions;
+  const _SessionSection(this.key, this.label, this.sessions);
+}
+
+/// 分组会话列表：组头（折叠/展开 + 计数）+ 会话行（置顶图钉 / 归档置灰，
+/// 长按弹置顶/归档菜单）。仅一个未分组段时退化为无组头平铺（与旧观感一致）。
+class _DrawerList extends StatelessWidget {
+  final List<_SessionSection> sections;
+  final Set<String> pinnedIds;
+  final Set<String> archivedIds;
+  final Set<String> collapsedGroups;
+  final SessionSummary? selected;
+  final bool gradientPanel;
+  final Color onPanel;
+  final Color onPanelDim;
+  final void Function(SessionSummary) onSelect;
+  final void Function(String) onToggleGroup;
+  final Future<void> Function(SessionSummary) onRowMenu;
+  final void Function(SessionSummary) onArchivedTap;
+
+  const _DrawerList({
+    required this.sections,
+    required this.pinnedIds,
+    required this.archivedIds,
+    required this.collapsedGroups,
+    required this.selected,
+    required this.gradientPanel,
+    required this.onPanel,
+    required this.onPanelDim,
+    required this.onSelect,
+    required this.onToggleGroup,
+    required this.onRowMenu,
+    required this.onArchivedTap,
+  });
+
+  Widget header(_SessionSection sec, ThemeData theme) {
+    final collapsed = collapsedGroups.contains(sec.key);
+    return InkWell(
+      onTap: () => onToggleGroup(sec.key),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+        child: Row(
+          children: [
+            Icon(
+              collapsed ? Icons.expand_more : Icons.expand_less,
+              size: 16,
+              color: onPanelDim,
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                sec.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: onPanelDim,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Text(
+              '${sec.sessions.length}',
+              style: theme.textTheme.labelSmall?.copyWith(color: onPanelDim),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget row(BuildContext context, _SessionSection sec, SessionSummary s) {
+    final theme = Theme.of(context);
+    final archived = archivedIds.contains(s.sessionId);
+    final pinned = pinnedIds.contains(s.sessionId);
+    final isSelected = selected?.sessionId == s.sessionId;
+    return Material(
+      color: isSelected
+          ? (gradientPanel
+                ? Colors.white.withValues(alpha: 0.18)
+                : theme.colorScheme.primary.withValues(alpha: 0.15))
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onLongPress: () => onRowMenu(s),
+        onTap: () => archived ? onArchivedTap(s) : onSelect(s),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          child: Row(
+            children: [
+              Icon(
+                s.running
+                    ? Icons.play_circle
+                    : archived
+                    ? Icons.inventory_2_outlined
+                    : Icons.chat_bubble_outline,
+                size: 18,
+                color: s.running
+                    ? Acc.green(context)
+                    : onPanelDim.withValues(alpha: archived ? 0.5 : 1),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  s.title.isEmpty ? '(未命名会话)' : s.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: onPanel.withValues(alpha: archived ? 0.45 : 1),
+                  ),
+                ),
+              ),
+              if (pinned)
+                Icon(Icons.push_pin, size: 13, color: onPanelDim),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final children = <Widget>[];
+    for (final sec in sections) {
+      final solo = sections.length == 1 && sec.key == '__ungrouped__';
+      if (!solo) {
+        children.add(header(sec, theme));
+        if (collapsedGroups.contains(sec.key)) continue;
+      }
+      for (final s in sec.sessions) {
+        children.add(row(context, sec, s));
+      }
+    }
+    return ListView(padding: const EdgeInsets.symmetric(horizontal: 8), children: children);
   }
 }
 
