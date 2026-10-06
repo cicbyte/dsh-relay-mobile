@@ -3370,7 +3370,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                           builder: (ctx) {
                             final stats = _computeStats();
                             final line = _statusLine(stats);
-                            if (line.isEmpty && stats.ctxTok == 0) {
+                            final hasStrip =
+                                line.isNotEmpty || stats.ctxTok > 0;
+                            if (!hasStrip && _modelLabel.isEmpty) {
                               return const SizedBox.shrink();
                             }
                             final win = stats.ctxWindow ?? _ctxWindow;
@@ -3383,61 +3385,114 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                 right: 6,
                                 bottom: 4,
                               ),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(8),
-                                onTap: _showContextSheet,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 2,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      if (line.isNotEmpty)
-                                        Expanded(
-                                          child: Text(
-                                            line,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .labelSmall
-                                                ?.copyWith(
-                                                  color:
-                                                      scheme.onSurfaceVariant,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (hasStrip)
+                                    InkWell(
+                                      borderRadius: BorderRadius.circular(8),
+                                      onTap: _showContextSheet,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 2,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            if (line.isNotEmpty)
+                                              Expanded(
+                                                child: Text(
+                                                  line,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .labelSmall
+                                                      ?.copyWith(
+                                                        color:
+                                                            scheme.onSurfaceVariant,
+                                                      ),
                                                 ),
-                                          ),
-                                        ),
-                                      const SizedBox(width: 6),
-                                      // 上下文进度环：占用/窗口（宿主投影优先）
-                                      SizedBox(
-                                        width: 14,
-                                        height: 14,
-                                        child: CircularProgressIndicator(
-                                          value: ctxPct,
-                                          strokeWidth: 2.4,
-                                          strokeCap: StrokeCap.round,
-                                          backgroundColor:
-                                              scheme.outlineVariant,
-                                          valueColor: AlwaysStoppedAnimation(
-                                            ctxPct > 0.85
-                                                ? scheme.error
-                                                : scheme.primary,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '${(ctxPct * 100).toStringAsFixed(0)}%',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelSmall
-                                            ?.copyWith(
-                                              color: scheme.onSurfaceVariant,
+                                              ),
+                                            const SizedBox(width: 6),
+                                            // 上下文进度环：占用/窗口（宿主投影优先）
+                                            SizedBox(
+                                              width: 14,
+                                              height: 14,
+                                              child: CircularProgressIndicator(
+                                                value: ctxPct,
+                                                strokeWidth: 2.4,
+                                                strokeCap: StrokeCap.round,
+                                                backgroundColor:
+                                                    scheme.outlineVariant,
+                                                valueColor:
+                                                    AlwaysStoppedAnimation(
+                                                  ctxPct > 0.85
+                                                      ? scheme.error
+                                                      : scheme.primary,
+                                                ),
+                                              ),
                                             ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              '${(ctxPct * 100).toStringAsFixed(0)}%',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelSmall
+                                                  ?.copyWith(
+                                                    color: scheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                                    ],
-                                  ),
-                                ),
+                                    ),
+                                  // 非默认模型：状态条下一行小字（点按换模型）
+                                  if (_modelLabel.isNotEmpty)
+                                    Padding(
+                                      padding: EdgeInsets.only(
+                                        left: 6,
+                                        top: hasStrip ? 1 : 2,
+                                      ),
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(6),
+                                        onTap: _pickModel,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 2,
+                                            vertical: 1,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.tune,
+                                                size: 11,
+                                                color: scheme.onSurfaceVariant
+                                                    .withValues(alpha: 0.8),
+                                              ),
+                                              const SizedBox(width: 3),
+                                              Text(
+                                                '模型 $_modelLabel',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .labelSmall
+                                                    ?.copyWith(
+                                                      color: scheme
+                                                          .onSurfaceVariant
+                                                          .withValues(
+                                                              alpha: 0.8),
+                                                    ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             );
                           },
@@ -3476,49 +3531,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // 生效中的设置 chip：仅在有激活项时出现（计划开 /
-                              // 权限非默认 / 模型非默认），平时零占位不干扰。
-                              if (_planActive ||
-                                  _permissionPreset.isNotEmpty ||
-                                  _modelLabel.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    left: 4,
-                                    right: 4,
-                                    bottom: 6,
-                                  ),
-                                  child: Wrap(
-                                    spacing: 6,
-                                    runSpacing: 6,
-                                    crossAxisAlignment:
-                                        WrapCrossAlignment.center,
-                                    children: [
-                                      if (_planActive)
-                                        _composerPill(
-                                          icon: Icons.map_outlined,
-                                          label: '计划 · 开',
-                                          active: true,
-                                          onTap: _togglePlan,
-                                        ),
-                                      if (_permissionPreset.isNotEmpty)
-                                        _composerPill(
-                                          icon: Icons
-                                              .admin_panel_settings_outlined,
-                                          label:
-                                              '权限 · ${_permissionLabel(_permissionPreset)}',
-                                          active: true,
-                                          onTap: _pickPermission,
-                                        ),
-                                      if (_modelLabel.isNotEmpty)
-                                        _composerPill(
-                                          icon: Icons.tune,
-                                          label: '模型 · $_modelLabel',
-                                          active: true,
-                                          onTap: _pickModel,
-                                        ),
-                                    ],
-                                  ),
-                                ),
+                              // 设置类（权限/计划/模型）全部收纳进「+」面板，
+                              // 输入卡不再放激活 chip——省一行高度不干扰。
+                              SizedBox.shrink(),
                               // 单行胶囊（参考 WorkBuddy）：+ 展开全部扩展，
                               // 中间输入，右端发送/停止。
                               Row(
