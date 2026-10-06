@@ -54,6 +54,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
 
   /// 历史向前翻页在途（滚动到顶自动触发）
   bool _loadingEarlier = false;
+
+  /// 离开底部时显示「回到底部」悬浮钮
+  bool _showJumpBottom = false;
   bool _loading = true;
   bool _sending = false;
   String? _error;
@@ -829,6 +832,17 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     if (now.difference(_lastSpy).inMilliseconds < 150) return;
     _lastSpy = now;
     _maybeAutoLoadEarlier();
+    // 回底钮可见性：最后一行不可见即显示
+    var maxIdx = -1;
+    var atBottom = false;
+    for (final p in _itemPositions.itemPositions.value) {
+      if (p.index > maxIdx) maxIdx = p.index;
+      if (p.index >= _itemCount - 1 && p.itemTrailingEdge <= 1.05) {
+        atBottom = true;
+      }
+    }
+    final show = !atBottom && maxIdx >= 0;
+    if (show != _showJumpBottom) setState(() => _showJumpBottom = show);
     int? top;
     for (final p in _itemPositions.itemPositions.value) {
       if (p.itemLeadingEdge <= 0.15 && (top == null || p.index > top)) {
@@ -3031,7 +3045,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                 _loading
                     ? const Center(child: CircularProgressIndicator())
                     : Builder(
-                        builder: (_) {
+                        builder: (listCtx) {
+                          final scheme = Theme.of(listCtx).colorScheme;
                           final items = _buildItems(records);
                           return Stack(
                             children: [
@@ -3056,6 +3071,31 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                                       height: 22,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2.2,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              // 回到底部悬浮钮：离开底部时右下角浮现
+                              if (_showJumpBottom)
+                                Positioned(
+                                  right: 12,
+                                  bottom: 12,
+                                  child: Material(
+                                    elevation: 3,
+                                    shadowColor: scheme.scrim,
+                                    color: scheme.surfaceContainerHighest,
+                                    shape: const CircleBorder(),
+                                    child: InkWell(
+                                      customBorder: const CircleBorder(),
+                                      onTap: _scrollToBottom,
+                                      child: SizedBox(
+                                        width: 38,
+                                        height: 38,
+                                        child: Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          size: 26,
+                                          color: scheme.onSurfaceVariant,
+                                        ),
                                       ),
                                     ),
                                   ),
