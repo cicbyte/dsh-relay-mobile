@@ -190,7 +190,14 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     },
   );
 
-  /// 运行态：最后一条 turn/start 在最后一条 turn/end 之后（无轮次记录时回退 summary）。
+  /// 宿主权威运行位（session/list 的 agent.status==='running'，桌面同源）。
+  /// null = 尚未同步，此时回退日志推导。
+  bool? _hostRunning;
+  int _hostRunningTick = 0;
+
+  /// 运行态合成：日志见 turn/end（最新事件流）→ 立即空闲；
+  /// 只见 turn/start（后台错过收尾/异常收尾）→ 以宿主位为准解卡；
+  /// 无轮次记录 → 宿主位，再退 summary。
   bool get _running {
     var lastStart = -1;
     var lastEnd = -1;
@@ -198,8 +205,31 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       if (r.type == 'turn/start') lastStart = r.seq;
       if (r.type == 'turn/end') lastEnd = r.seq;
     }
-    if (lastStart < 0 && lastEnd < 0) return widget.summary.running;
-    return lastStart > lastEnd;
+    if (lastStart < 0 && lastEnd < 0) {
+      return _hostRunning ?? widget.summary.running;
+    }
+    if (lastStart <= lastEnd) return false;
+    return _hostRunning ?? true;
+  }
+
+  Future<void> _syncHostRunning() async {
+    try {
+      final v = await widget.client.sessionList();
+      SessionSummary? mine;
+      for (final raw in (v['items'] as List? ?? [])) {
+        if (raw is! Map) continue;
+        final s = SessionSummary.fromJson(Map<String, dynamic>.from(raw));
+        if (s.sessionId == widget.summary.sessionId) {
+          mine = s;
+          break;
+        }
+      }
+      if (mine == null || !mounted) return;
+      final running = mine.running;
+      if (running != _hostRunning) {
+        setState(() => _hostRunning = running);
+      }
+    } catch (_) {}
   }
 
   int? get _turnStartMs {
@@ -239,14 +269,23 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     _inputCtrl.addListener(_onInputChanged);
     _itemPositions.itemPositions.addListener(_onPositions);
     // 断线自动重连后自动重订阅（避免人工点重试）
-    _mux.onReconnected = _openFollow;
+    _mux.onReconnected = () {
+      _openFollow();
+      _syncHostRunning(); // 重连即对齐宿主运行位（后台错过的事件不再卡状态）
+    };
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || !_running) return;
       setState(() {});
       // 后台时把最新动作刷进进度通知（内容有变化才发，秒表由系统自己走）
       _syncBgProgressTick();
+      // 运行中每 10s 向宿主复核运行位：异常收尾没有 turn/end 时自动解卡
+      if (++_hostRunningTick >= 10) {
+        _hostRunningTick = 0;
+        _syncHostRunning();
+      }
     });
     _start();
+    _syncHostRunning();
     // 宿主投影控制流（session/control）：sessionStats/tokenUsage/contextPressure
     // 的全量统计从这里实时下发（与桌面同源同口径），快照基线之外的增量也走它。
     _startCtrlStream();
@@ -333,6 +372,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       if (mounted && !_running) _restoreKeepNotif();
       if (!mounted) return;
+      _syncHostRunning(); // 回台即对齐宿主运行位（任务可能已在后台完成）
       if (_mux.isConnected) {
         _openFollow();
       } else {
@@ -793,6 +833,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           _updateMinSeq();
           // 投影基线（宿主全量统计：sessionStats/tokenUsage/contextPressure…）
           _absorbProjections(frame['projections']);
+          _syncHostRunning(); // 快照即对齐宿主运行位（防历史推导假阳性）
         case 'event':
           final e = frame['event'];
           if (e is Map) {
