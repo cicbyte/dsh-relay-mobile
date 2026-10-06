@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -3702,25 +3703,7 @@ String _prettyJson(String raw) {
   }
 }
 
-/// 参数单行摘要：key=val, key=val…
-String _argSummary(String raw) {
-  try {
-    final v = jsonDecode(raw);
-    if (v is Map) {
-      return v.entries
-          .take(3)
-          .map((e) {
-            var val = '${e.value}'.replaceAll('\n', ' ');
-            if (val.length > 24) val = '${val.substring(0, 24)}…';
-            return '${e.key}=$val';
-          })
-          .join(', ');
-    }
-    return '$v'.replaceAll('\n', ' ');
-  } catch (_) {
-    return raw.replaceAll('\n', ' ');
-  }
-}
+/// 参数单行摘要：见 [_argSummary]（按工具变体取 key 偏好链）。
 
 const TextStyle _monoStyle = TextStyle(
   fontFamily: 'monospace',
@@ -3798,8 +3781,223 @@ class _ToolEntry {
     if (arguments.isEmpty && args.isNotEmpty) {
       arguments = args;
       argsPretty = _prettyJson(args);
-      argSummary = _argSummary(args);
+      argSummary = _argSummary(this.name, args);
     }
+  }
+}
+
+// ---- 工具行呈现（对齐桌面 ui-tool：变体 → 图标/标题/摘要）----
+
+/// 工具名 → 行变体（桌面 TOOL_VARIANTS 同表）。
+String _toolVariant(String name) {
+  switch (name) {
+    case 'bash':
+    case 'pwsh':
+      return 'bash';
+    case 'read':
+    case 'read_image':
+    case 'web_fetch':
+    case 'cordis_package_inspect':
+    case 'cordis_runtime_inspect':
+      return 'read';
+    case 'web_search':
+    case 'grep':
+    case 'glob':
+      return 'search';
+    case 'write':
+      return 'write';
+    case 'edit':
+      return 'edit';
+    case 'run_code':
+      return 'code';
+    default:
+      return 'others';
+  }
+}
+
+/// 工具专名图标（桌面 details-row/detailIcon 同表），未命中回退变体图标。
+IconData? _toolIcon(String name) {
+  switch (name) {
+    case 'todo_write':
+      return Icons.checklist;
+    case 'ask_user_question':
+      return Icons.help_outline;
+    case 'subagent':
+    case 'spawn_teammate':
+    case 'list_agents':
+    case 'send_message':
+    case 'interrupt_agent':
+    case 'wait_agent':
+    case 'team_task_create':
+    case 'team_task_get':
+    case 'team_task_update':
+    case 'team_task_list':
+      return Icons.group_outlined;
+    case 'create_goal':
+    case 'get_goal':
+    case 'update_goal':
+      return Icons.flag_outlined;
+    case 'schedule_create':
+    case 'schedule_list':
+    case 'schedule_delete':
+    case 'schedule_update':
+      return Icons.schedule;
+    case 'terminal_open':
+    case 'terminal_read':
+    case 'terminal_list':
+    case 'terminal_signal':
+    case 'terminal_close':
+      return Icons.terminal;
+    case 'workflow':
+    case 'ralph':
+      return Icons.account_tree_outlined;
+    case 'job_list':
+    case 'job_output':
+    case 'job_kill':
+      return Icons.checklist;
+    case 'read_image':
+      return Icons.image_outlined;
+  }
+  switch (_toolVariant(name)) {
+    case 'search':
+      return Icons.search;
+    case 'read':
+      return Icons.menu_book_outlined;
+    case 'bash':
+      return Icons.terminal;
+    case 'write':
+    case 'edit':
+      return Icons.edit_outlined;
+    case 'code':
+      return Icons.code;
+    default:
+      return Icons.auto_awesome; // others：桌面 SparkleRegular 同款
+  }
+}
+
+/// 工具中文标题（桌面 locales.ts 同表），未命中回退变体标题。
+String _toolTitle(String name) {
+  const owned = {
+    'bash': '运行命令',
+    'pwsh': '运行命令',
+    'read': '读取',
+    'read_image': '读取图片',
+    'web_search': '搜索',
+    'grep': '搜索',
+    'glob': '搜索',
+    'write': '写入',
+    'edit': '编辑',
+    'run_code': '代码',
+    'todo_write': '更新任务清单',
+    'ask_user_question': '提问',
+    'subagent': '创建子智能体',
+    'list_agents': '查看子智能体',
+    'send_message': '发送消息',
+    'interrupt_agent': '中断智能体',
+    'wait_agent': '等待子智能体',
+    'spawn_teammate': '创建队友',
+    'list_subagent_models': '查看可用模型',
+    'job_list': '查看后台任务',
+    'job_output': '读取任务输出',
+    'job_kill': '取消后台任务',
+    'create_goal': '创建目标',
+    'get_goal': '查看目标',
+    'update_goal': '更新目标',
+    'schedule_create': '创建定时任务',
+    'schedule_list': '查看定时任务',
+    'schedule_delete': '删除定时任务',
+    'schedule_update': '修改定时任务',
+    'terminal_open': '创建终端',
+    'terminal_read': '读取终端',
+    'terminal_list': '查看终端',
+    'terminal_signal': '发送终端信号',
+    'terminal_close': '关闭终端',
+    'workflow': '运行工作流',
+    'ralph': '运行循环工作流',
+    'session_search': '搜索会话',
+  };
+  final hit = owned[name];
+  if (hit != null) return hit;
+  switch (_toolVariant(name)) {
+    case 'bash':
+      return '运行命令';
+    case 'read':
+      return '读取';
+    case 'search':
+      return '搜索';
+    case 'write':
+      return '写入';
+    case 'edit':
+      return '编辑';
+    case 'code':
+      return '代码';
+    default:
+      return '工具调用';
+  }
+}
+
+/// `C:\Users\zhyj\xx` → `~\xx`（桌面 abbreviateHomePath 同义）。
+String _abbrHome(String p) {
+  final home = Platform.environment['USERPROFILE'] ?? '';
+  if (home.isEmpty) return p;
+  final norm = p.replaceAll('/', r'\');
+  final normHome = home.replaceAll('/', r'\');
+  if (norm.toLowerCase().startsWith(normHome.toLowerCase())) {
+    return '~${norm.substring(normHome.length)}';
+  }
+  return p;
+}
+
+String _firstLine(String text) {
+  final i = text.indexOf('\n');
+  return i == -1 ? text : text.substring(0, i);
+}
+
+/// 参数单行摘要（桌面 deriveSummary 同式）：按变体 key 偏好链取值。
+String _argSummary(String toolName, String raw) {
+  List<String> pref(String variant) {
+    switch (variant) {
+      case 'bash':
+        return ['description', 'command'];
+      case 'read':
+        return ['path', 'file_path', 'url'];
+      case 'search':
+        return ['query', 'pattern', 'url'];
+      case 'write':
+      case 'edit':
+        return ['path', 'file_path'];
+      case 'code':
+        return ['description'];
+      default:
+        return [];
+    }
+  }
+
+  try {
+    final v = jsonDecode(raw);
+    if (v is! Map) return _firstLine('$v'.replaceAll('\n', ' '));
+    // web_search：queries 数组逐条首行拼接（桌面同款特例）
+    if (_toolVariant(toolName) == 'search' && v['queries'] is List) {
+      final queries = (v['queries'] as List)
+          .whereType<String>()
+          .where((q) => q.isNotEmpty)
+          .map(_firstLine)
+          .toList();
+      if (queries.isNotEmpty) return queries.join(', ');
+    }
+    for (final key in pref(_toolVariant(toolName))) {
+      final val = v[key];
+      if (val is String && val.isNotEmpty) {
+        final line = _firstLine(val);
+        return key == 'path' || key == 'file_path' ? _abbrHome(line) : line;
+      }
+    }
+    for (final val in v.values) {
+      if (val is String && val.isNotEmpty) return _firstLine(val);
+    }
+    return _firstLine(raw);
+  } catch (_) {
+    return _firstLine(raw.replaceAll('\n', ' '));
   }
 }
 
@@ -3841,24 +4039,23 @@ class _ToolCallCardState extends State<_ToolCallCard> {
             onTap: () => setState(() => _expanded = !_expanded),
             child: Row(
               children: [
-                if (e.isError)
-                  Icon(Icons.close, size: 14, color: scheme.error)
-                else if (done)
-                  Icon(Icons.check, size: 14, color: Acc.green(context))
-                else
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.8,
-                      color: scheme.primary,
-                    ),
-                  ),
+                // 变体/专名图标：状态着色（运行=琥珀、错误=红、完成=中性）
+                // ——桌面 ToolRow 同式，替代旧的光秃 ✓/✗。
+                Icon(
+                  _toolIcon(e.name),
+                  size: 15,
+                  color: e.isError
+                      ? scheme.error
+                      : done
+                      ? scheme.onSurfaceVariant
+                      : Acc.orange(context),
+                ),
                 const SizedBox(width: 8),
                 Text(
-                  e.name,
+                  _toolTitle(e.name),
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w600,
+                    color: e.isError ? scheme.error : null,
                   ),
                 ),
                 const SizedBox(width: 8),
