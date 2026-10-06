@@ -57,6 +57,44 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
 
   /// 离开底部时显示「回到底部」悬浮钮
   bool _showJumpBottom = false;
+
+  /// 回底判定去抖：偏离需稳定 600ms 才亮钮（自动追赶动画/新消息追加的
+  /// 瞬时离屏不闪现）；回底立即隐藏。
+  bool _awayFromBottom = false;
+  Timer? _jumpDebounce;
+
+  bool _computeAwayFromBottom() {
+    // 语义判定：最后一行在窗口内（哪怕只露一角）= 在底部——目的只是
+    // 看最新消息；流式追赶动画的瞬时离屏由 600ms 去抖吸收。
+    var maxIdx = -1;
+    for (final p in _itemPositions.itemPositions.value) {
+      if (p.index > maxIdx) maxIdx = p.index;
+    }
+    return maxIdx >= 0 && maxIdx < _itemCount - 1;
+  }
+
+  void _updateJumpBottom() {
+    if (_itemCount == 0) return;
+    final away = _computeAwayFromBottom();
+    if (away == _awayFromBottom) return;
+    _awayFromBottom = away;
+    _jumpDebounce?.cancel();
+    if (!away) {
+      if (_showJumpBottom && mounted) setState(() => _showJumpBottom = false);
+    } else {
+      _jumpDebounce = Timer(const Duration(milliseconds: 600), () {
+        // 复核：去抖期间可能已自动回底（追赶动画落定），以当前位置为准；
+        // 节流可能吞掉回底采样，不能只信武装时的旧状态。
+        if (!mounted || !_awayFromBottom) return;
+        if (!_computeAwayFromBottom()) {
+          _awayFromBottom = false;
+          if (_showJumpBottom) setState(() => _showJumpBottom = false);
+          return;
+        }
+        if (!_showJumpBottom) setState(() => _showJumpBottom = true);
+      });
+    }
+  }
   bool _loading = true;
   bool _sending = false;
   String? _error;
@@ -663,6 +701,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
+    _jumpDebounce?.cancel();
     _ctrlMux?.close();
     _sub?.cancel();
     _controlSub?.cancel();
@@ -804,12 +843,17 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_itemScrollCtrl.isAttached || _itemCount == 0) return;
-      _itemScrollCtrl.scrollTo(
-        index: _itemCount - 1,
-        alignment: 1,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
+      _itemScrollCtrl
+          .scrollTo(
+            index: _itemCount - 1,
+            alignment: 1,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          )
+          .whenComplete(() {
+        // 动画落定后位置监听不再发事件：静止态必须主动再评估回底钮
+        if (mounted) _updateJumpBottom();
+      });
     });
   }
 
@@ -832,17 +876,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     if (now.difference(_lastSpy).inMilliseconds < 150) return;
     _lastSpy = now;
     _maybeAutoLoadEarlier();
-    // 回底钮可见性：最后一行不可见即显示
-    var maxIdx = -1;
-    var atBottom = false;
-    for (final p in _itemPositions.itemPositions.value) {
-      if (p.index > maxIdx) maxIdx = p.index;
-      if (p.index >= _itemCount - 1 && p.itemTrailingEdge <= 1.05) {
-        atBottom = true;
-      }
-    }
-    final show = !atBottom && maxIdx >= 0;
-    if (show != _showJumpBottom) setState(() => _showJumpBottom = show);
+    _updateJumpBottom();
     int? top;
     for (final p in _itemPositions.itemPositions.value) {
       if (p.itemLeadingEdge <= 0.15 && (top == null || p.index > top)) {
@@ -2394,6 +2428,13 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       ..clear()
       ..addAll(turnStartIdx);
     _indexTurn = List<int?>.from(idxTurn);
+    if (out.length != _itemCount) {
+      // 条目数变化（流式追加/翻页）：落帧后主动再评估回底钮——
+      // 位置监听只在滚动中触发，静止追加必须自补采样。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _updateJumpBottom();
+      });
+    }
     _itemCount = out.length;
     return out;
   }
