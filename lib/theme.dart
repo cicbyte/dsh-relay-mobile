@@ -12,17 +12,17 @@ enum DshSkin { darkGlass, cleanLight, brandSplash, monoPro }
 
 extension DshSkinMeta on DshSkin {
   String get label => switch (this) {
-        DshSkin.darkGlass => 'A · 深空玻璃',
-        DshSkin.cleanLight => 'B · 晨白',
-        DshSkin.brandSplash => 'C · 鲸蓝',
-        DshSkin.monoPro => 'D · 墨白',
+        DshSkin.darkGlass => '深空玻璃',
+        DshSkin.cleanLight => '晨白',
+        DshSkin.brandSplash => '鲸蓝',
+        DshSkin.monoPro => '墨白',
       };
 
   String get short => switch (this) {
-        DshSkin.darkGlass => 'A',
-        DshSkin.cleanLight => 'B',
-        DshSkin.brandSplash => 'C',
-        DshSkin.monoPro => 'D',
+        DshSkin.darkGlass => '深空玻璃',
+        DshSkin.cleanLight => '晨白',
+        DshSkin.brandSplash => '鲸蓝',
+        DshSkin.monoPro => '墨白',
       };
 
   String get desc => switch (this) {

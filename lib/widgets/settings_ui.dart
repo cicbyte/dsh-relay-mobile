@@ -73,8 +73,9 @@ class SettingsTile extends StatelessWidget {
               Text(title, style: theme.textTheme.bodyLarge),
               if (subtitle != null) ...[
                 const SizedBox(height: 2),
+                // 副标题允许两行：长提示换行呈现，不靠省略号丢信息
                 Text(subtitle!,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
