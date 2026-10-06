@@ -2155,70 +2155,116 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     return const Text('[图片]');
   }
 
-  /// 平铺消息：小图标 + 标签 + 时间/用量/复制 + 正文，无气泡背景。
+  /// 消息块（对齐桌面：无「你/助手」文字标签——用户=右对齐气泡，
+  /// 助手=左对齐纯内容流；时间/用量/复制收纳成小字 meta 行）。
   Widget _messageBubble({
-    required String label,
+    required bool mine,
     required List<Widget> body,
     int? time,
     String? usage,
     String? copyText,
+    bool interrupted = false,
   }) {
     final theme = Theme.of(context);
-    final mine = label == '你';
+    final scheme = theme.colorScheme;
     final meta = [
+      if (interrupted) '已中断',
       if (time != null) _fmtClock(time),
       if (usage != null) usage,
     ].join(' · ');
+
+    Widget? metaRow({bool below = false}) {
+      final hasCopy = copyText != null && copyText.trim().isNotEmpty;
+      if (meta.isEmpty && !hasCopy) return null;
+      return Row(
+        mainAxisAlignment: below ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          if (meta.isNotEmpty) ...[
+            Text(
+              meta,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+          if (hasCopy) ...[
+            if (meta.isNotEmpty) const SizedBox(width: 8),
+            InkWell(
+              onTap: () async {
+                await Clipboard.setData(ClipboardData(text: copyText));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('已复制'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                }
+              },
+              child: Icon(
+                Icons.copy,
+                size: 12,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
+    if (mine) {
+      // 用户：右对齐气泡（宽 ≤85%），meta+复制 收在气泡下方右对齐
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.85,
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(14),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(4),
+                ),
+              ),
+              child: body.isEmpty
+                  ? Text('(空)', style: theme.textTheme.bodyMedium)
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (var i = 0; i < body.length; i++) ...[
+                          if (i > 0) const SizedBox(height: 5),
+                          body[i],
+                        ],
+                      ],
+                    ),
+            ),
+            if (metaRow(below: true) != null) ...[
+              const SizedBox(height: 3),
+              metaRow(below: true)!,
+            ],
+          ],
+        ),
+      );
+    }
+
+    // 助手/其他：meta 在顶部右对齐（不再有图标+标签头），正文左对齐内容流
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(
-                mine ? Icons.person_outline : Icons.auto_awesome,
-                size: 13,
-                color: mine
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 5),
-              Text(label, style: theme.textTheme.labelSmall),
-              const Spacer(),
-              if (meta.isNotEmpty) ...[
-                Text(
-                  meta,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant.withValues(
-                      alpha: 0.7,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              if (copyText != null && copyText.trim().isNotEmpty)
-                InkWell(
-                  onTap: () async {
-                    await Clipboard.setData(ClipboardData(text: copyText));
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('已复制'),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                    }
-                  },
-                  child: Icon(
-                    Icons.copy,
-                    size: 12,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 5),
+          if (metaRow() != null) ...[
+            metaRow()!,
+            const SizedBox(height: 4),
+          ],
           if (body.isEmpty)
             const Text('(空)')
           else
@@ -2231,7 +2277,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     );
   }
 
-  /// tool/result 的配对键：优先 message.source.callId（实测稳定存在），
+
+/// tool/result 的配对键：优先 message.source.callId（实测稳定存在），
   /// 次之 tool-result 块 callId、事件 callId，兜底 seq。
   String _resultKey(WireRecord r) {
     final msg = Map<String, dynamic>.from(r.data['message'] as Map? ?? {});
@@ -2318,6 +2365,27 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     final responses = <int, String>{};
     final turnStartIdx = <int, int>{};
     final idxTurn = <int>[];
+    // 轮尾文件概览（桌面 deliverables 同式）：轮内成功的 write/edit 变更路径
+    final turnProduced = <int, List<String>>{};
+    final flushedTurns = <int>{};
+    var lastAttributedTurn = -1;
+    void noteProduced(int turn, String? path) {
+      if (path == null || turn == 0) return;
+      final list = turnProduced.putIfAbsent(turn, () => <String>[]);
+      if (!list.contains(path)) list.add(path);
+    }
+
+    /// 进入新轮前把上一轮的概览卡落盘（归属上一轮，轮尾即位）。
+    Widget? flushTail(int turn) {
+      if (turn == -1 ||
+          flushedTurns.contains(turn) ||
+          (turnProduced[turn]?.isEmpty ?? true)) {
+        return null;
+      }
+      flushedTurns.add(turn);
+      return _ChangedFilesCard(paths: turnProduced[turn]!);
+    }
+
     for (final r in records) {
       if (r.ignorable) continue;
       final markLen = out.length;
@@ -2350,7 +2418,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           } else {
             out.add(
               _messageBubble(
-                label: '你',
+                mine: true,
                 body: _blockWidgets(r.data['content']),
                 time: r.time,
                 copyText: _contentText(r.data['content']),
@@ -2387,7 +2455,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             final u = Map<String, dynamic>.from(r.data['usage'] as Map? ?? {});
             out.add(
               _messageBubble(
-                label: '助手${r.data['interrupted'] == true ? '（已中断）' : ''}',
+                mine: false,
+                interrupted: r.data['interrupted'] == true,
                 body: body,
                 time: r.time,
                 usage: u.isEmpty
@@ -2407,6 +2476,13 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
               ));
           if (!e.emitted) {
             e.emitted = true;
+            // 变更工具成功结果 → 记入本轮产出（桌面 deliverables 口径）
+            if (e.hasResult && !e.isError) {
+              noteProduced(
+                curTurn,
+                _mutationPath(e.name, e.arguments),
+              );
+            }
             out.add(_ToolCallCard(entry: e));
           }
         case 'tool/result':
@@ -2418,6 +2494,12 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                 ..hasResult = true);
           if (!e.emitted) {
             e.emitted = true;
+            if (e.hasResult && !e.isError) {
+              noteProduced(
+                curTurn,
+                _mutationPath(e.name, e.arguments),
+              );
+            }
             out.add(_ToolCallCard(entry: e));
           }
         default:
@@ -2427,6 +2509,15 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       for (var k = markLen; k < out.length; k++) {
         idxTurn.add(curTurn);
       }
+      // 轮切换：先把上一轮的文件概览卡插在本轮首行之前（归属上一轮）
+      if (lastAttributedTurn != -1 && curTurn != lastAttributedTurn) {
+        final tail = flushTail(lastAttributedTurn);
+        if (tail != null) {
+          out.insert(markLen, tail);
+          idxTurn.add(lastAttributedTurn);
+        }
+      }
+      lastAttributedTurn = curTurn;
       if (curTurn != 0) {
         // 该轮首个可见行即锚点；turn/start 分界行若在则首选
         if (out.length > markLen && !turnStartIdx.containsKey(curTurn)) {
@@ -2455,6 +2546,12 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           }
         }
       }
+    }
+    // 末轮收尾：列表末尾落最后一轮的概览卡
+    final lastTail = flushTail(lastAttributedTurn);
+    if (lastTail != null) {
+      out.add(lastTail);
+      idxTurn.add(lastAttributedTurn);
     }
     // 轮次导航项（升序；锚点行索引 = items 索引）
     final turns = turnStartIdx.keys.toList()..sort();
@@ -4039,6 +4136,138 @@ String _argSummary(String toolName, String raw) {
     return _firstLine(raw);
   } catch (_) {
     return _firstLine(raw.replaceAll('\n', ' '));
+  }
+}
+
+  /// 一次性变更工具（write/edit/str_replace_editor）的变更路径提取
+/// （桌面 turn-deliverables mutationPath 同式；仅完整合法调用算产出）。
+String? _mutationPath(String name, String argsRaw) {
+  Map<String, dynamic>? args;
+  try {
+    final v = jsonDecode(argsRaw);
+    if (v is Map<String, dynamic>) args = v;
+  } catch (_) {
+    return null;
+  }
+  String? pv(Object? v) =>
+      v is String && v.trim().isNotEmpty ? v : null;
+  switch (name) {
+    case 'write':
+      return args?['content'] is String ? pv(args?['file_path']) : null;
+    case 'edit':
+      final old = args?['old_string'];
+      final neu = args?['new_string'];
+      if (old is String && old.isNotEmpty && neu is String && old != neu) {
+        return pv(args?['file_path']);
+      }
+      return null;
+    case 'str_replace_editor':
+      final path = pv(args?['path']);
+      if (path == null) return null;
+      switch (args?['command']) {
+        case 'create':
+          return args?['file_text'] is String ? path : null;
+        case 'str_replace':
+          final os = args?['old_str'];
+          return os is String && os.isNotEmpty ? path : null;
+        case 'insert':
+          return args?['insert_line'] is int &&
+                  args?['new_str'] is String
+              ? path
+              : null;
+        default:
+          return null;
+      }
+    default:
+      return null;
+  }
+}
+
+/// 轮尾文件概览卡（桌面 ChangedFiles 同款文案）：「已编辑 N 个文件」/
+/// 「已编辑 {名}」，点按折叠展开完整清单。
+class _ChangedFilesCard extends StatefulWidget {
+  final List<String> paths;
+  const _ChangedFilesCard({required this.paths});
+
+  @override
+  State<_ChangedFilesCard> createState() => _ChangedFilesCardState();
+}
+
+class _ChangedFilesCardState extends State<_ChangedFilesCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final paths = widget.paths;
+    final single = paths.length == 1 ? paths.first : null;
+    String base(String p) {
+      final norm = p.replaceAll('\\', '/');
+      final i = norm.lastIndexOf('/');
+      return i == -1 ? norm : norm.substring(i + 1);
+    }
+
+    final preview = paths.take(3).map(base).join('、');
+    final rest = paths.length - 3;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 2, 14, 6),
+      child: Material(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: paths.length <= 1 ? null : () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
+              children: [
+                Icon(
+                  single != null ? Icons.description_outlined : Icons.code,
+                  size: 16,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        single != null ? '已编辑 ${base(single)}' : '已编辑 ${paths.length} 个文件',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (paths.length > 1)
+                        Text(
+                          _expanded
+                              ? paths.map(base).join('\n')
+                              : rest > 0
+                                  ? '$preview 等 ${paths.length} 个'
+                                  : preview,
+                          maxLines: _expanded ? paths.length : 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (paths.length > 1)
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 15,
+                    color: scheme.onSurfaceVariant,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
