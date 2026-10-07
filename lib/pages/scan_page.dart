@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -57,51 +58,18 @@ class _ScanPageState extends State<ScanPage>
   }
 
   /// 相册识别：纯 Dart zxing2 解码（不依赖 MLKit）。
+  /// 解码/缩放/扫描全部丢进 isolate（见 [_decodeQrFile]）——此前在主 isolate
+  /// 跑，1200 万像素相册图会秒级冻结 UI。
   Future<void> _fromGallery() async {
     try {
       final pick = await FilePicker.platform.pickFiles(type: FileType.image);
       final path = pick?.files.single.path;
       if (path == null) return;
-      final raw = await File(path).readAsBytes();
-      final image = imglib.decodeImage(raw);
-      if (image == null) {
-        _snack('无法读取图片');
-        return;
-      }
-      // 大图缩到 ≤1400px：纯 Dart 解码耗时可控
-      final scaled = (image.width > 1400 || image.height > 1400)
-          ? (image.width >= image.height
-                ? imglib.copyResize(image, width: 1400)
-                : imglib.copyResize(image, height: 1400))
-          : image;
-      final bytes = scaled.getBytes(order: imglib.ChannelOrder.rgba);
-      final pixels = Int32List(scaled.width * scaled.height);
-      for (int o = 0, p = 0; o + 3 < bytes.length; o += 4, p++) {
-        // zxing2 期望 R<<16 | G<<8 | B
-        pixels[p] = (bytes[o] << 16) | (bytes[o + 1] << 8) | bytes[o + 2];
-      }
-      final source = RGBLuminanceSource(scaled.width, scaled.height, pixels);
-      final hints = DecodeHints()..put(DecodeHintType.tryHarder);
-      String? text;
-      try {
-        text = QRCodeReader()
-            .decode(BinaryBitmap(HybridBinarizer(source)), hints: hints)
-            .text;
-      } on NotFoundException {
-        // 黑底白码：反转亮度再试一次
-        try {
-          text = QRCodeReader()
-              .decode(
-                BinaryBitmap(HybridBinarizer(InvertedLuminanceSource(source))),
-                hints: hints,
-              )
-              .text;
-        } on NotFoundException {
-          text = null;
-        }
-      }
+      final text = await Isolate.run(() => _decodeQrFile(path));
       if (text != null && text.isNotEmpty) {
         _pop(text);
+      } else if (text != null) {
+        _snack('无法读取图片');
       } else {
         _snack('未在图片中识别到二维码');
       }
@@ -363,4 +331,45 @@ class _ViewfinderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ViewfinderPainter old) => old.window != window;
+}
+
+/// 相册二维码解码（isolate 内执行：整图解码/缩放/两轮 zxing 扫描都是 CPU 密集）。
+/// 返回：码文本 | null=未识别到码 | ''=图片不可读。
+String? _decodeQrFile(String path) {
+  final raw = File(path).readAsBytesSync();
+  final image = imglib.decodeImage(raw);
+  if (image == null) return '';
+  // 大图缩到 ≤1400px：纯 Dart 解码耗时可控
+  final scaled = (image.width > 1400 || image.height > 1400)
+      ? (image.width >= image.height
+            ? imglib.copyResize(image, width: 1400)
+            : imglib.copyResize(image, height: 1400))
+      : image;
+  final bytes = scaled.getBytes(order: imglib.ChannelOrder.rgba);
+  final pixels = Int32List(scaled.width * scaled.height);
+  for (int o = 0, p = 0; o + 3 < bytes.length; o += 4, p++) {
+    // zxing2 期望 R<<16 | G<<8 | B
+    pixels[p] = (bytes[o] << 16) | (bytes[o + 1] << 8) | bytes[o + 2];
+  }
+  final source = RGBLuminanceSource(scaled.width, scaled.height, pixels);
+  final hints = DecodeHints()..put(DecodeHintType.tryHarder);
+  String? text;
+  try {
+    text = QRCodeReader()
+        .decode(BinaryBitmap(HybridBinarizer(source)), hints: hints)
+        .text;
+  } on NotFoundException {
+    // 黑底白码：反转亮度再试一次
+    try {
+      text = QRCodeReader()
+          .decode(
+            BinaryBitmap(HybridBinarizer(InvertedLuminanceSource(source))),
+            hints: hints,
+          )
+          .text;
+    } on NotFoundException {
+      text = null;
+    }
+  }
+  return text;
 }

@@ -68,10 +68,12 @@ class EnvProfile {
     'name': name,
     'mode': mode,
     'url': url,
-    'lanCode': lanCode,
+    // 敏感码恒不进 SharedPreferences JSON（历史存量由 fromJson 迁入安全存储，
+    // 下次 save 起清零）
+    'lanCode': '',
     'relay': relay,
     'roomCode': roomCode,
-    'pairingCode': pairingCode,
+    'pairingCode': '',
     'deviceId': deviceId,
     'lastError': lastError,
     'lastConnectedAt': lastConnectedAt,
@@ -100,6 +102,10 @@ class ProfileStore {
 
   static String _tokenKey(String profileId) => 'dev.token.$profileId';
 
+  static String _lanCodeKey(String profileId) => 'prof.lanCode.$profileId';
+
+  static String _pairCodeKey(String profileId) => 'prof.pairCode.$profileId';
+
   static Future<List<EnvProfile>> load() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_kProfiles);
@@ -124,7 +130,14 @@ class ProfileStore {
           .whereType<Map>()
           .map((e) => EnvProfile.fromJson(Map<String, dynamic>.from(e)))
           .toList();
-      return await dedupe(list);
+      final hydrated = await dedupe(list);
+      // 敏感码（安全码/一次性配对码）不在 SharedPreferences JSON 里，
+      // 从安全存储回填（与设备令牌同等待遇）
+      for (final e in hydrated) {
+        e.lanCode = await _secure.read(key: _lanCodeKey(e.id)) ?? '';
+        e.pairingCode = await _secure.read(key: _pairCodeKey(e.id)) ?? '';
+      }
+      return hydrated;
     } catch (_) {
       return [];
     }
@@ -150,6 +163,9 @@ class ProfileStore {
     if (drop.isEmpty) return list;
     for (final d in drop) {
       await clearToken(d.id);
+      // 丢弃环境一并清安全码/一次性配对码
+      await _secure.delete(key: _lanCodeKey(d.id));
+      await _secure.delete(key: _pairCodeKey(d.id));
     }
     final result = list.where((e) => !drop.contains(e)).toList();
     await save(result);
@@ -158,6 +174,25 @@ class ProfileStore {
 
   static Future<void> save(List<EnvProfile> profiles) async {
     final p = await SharedPreferences.getInstance();
+    // 敏感码不进 SharedPreferences（明文 JSON，root/备份可读）：与设备令牌
+    // 一致进安全存储；JSON 里恒写空串
+    for (final e in profiles) {
+      try {
+        if (e.lanCode.isEmpty) {
+          await _secure.delete(key: _lanCodeKey(e.id));
+        } else {
+          await _secure.write(key: _lanCodeKey(e.id), value: e.lanCode);
+        }
+        // 一次性配对码：核销后调用方清空字段 → 这里同步删除
+        if (e.pairingCode.isEmpty) {
+          await _secure.delete(key: _pairCodeKey(e.id));
+        } else {
+          await _secure.write(key: _pairCodeKey(e.id), value: e.pairingCode);
+        }
+      } catch (_) {
+        /* 平台不支持安全存储：码不落盘，下次重输/重扫 */
+      }
+    }
     await p.setString(
       _kProfiles,
       jsonEncode(profiles.map((e) => e.toJson()).toList()),

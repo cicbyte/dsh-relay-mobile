@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../device_info.dart';
 import '../dsh/dsh_client.dart';
+import '../widgets/download_flow.dart';
 
 class HostStatusPage extends StatefulWidget {
   final DshClient client;
@@ -322,7 +323,8 @@ class _HostStatusPageState extends State<HostStatusPage> {
     setState(() => _saving = true);
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final name = '${r['name']}';
+      // 对端下发的文件名消毒（路径穿越/控制字符/同名覆盖）
+      final name = sanitizeFileName('${r['name']}');
       final tmp = File('${dir.path}/$name');
       await tmp.writeAsBytes(Uint8List.fromList(r['bytes'] as List<int>), flush: true);
       try {

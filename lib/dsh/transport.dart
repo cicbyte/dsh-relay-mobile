@@ -224,6 +224,9 @@ class RelayTransport extends DshTransport {
   final Map<String, Completer<Map<String, dynamic>>> _pending = {};
   // 流式下载（大文件分块）：rid -> 字节 StreamController，http-res chunk 帧逐块喂
   final Map<String, StreamController<List<int>>> _streams = {};
+
+  /// rid 自增序号：时间戳+序号保证唯一（此前用集合长度——完成后长度回退会撞号）
+  int _ridSeq = 0;
   // 流式下载元数据回调：rid -> onMeta(contentLength, status)
   // contentLength：200=全文长度 / 206=剩余长度 / 0=错误或 416（无载荷）
   final Map<String, void Function(int, int)?> _streamMeta = {};
@@ -430,6 +433,21 @@ class RelayTransport extends DshTransport {
         final rid = '${frame['rid']}';
         // 流式分块（下载大文件）：chunk 帧喂 StreamController，last 帧收尾（含 status）
         final sc = _streams[rid];
+        if (sc != null && frame['type'] == 'error') {
+          // 桥端错误（下载过期/设备不匹配/断线收尾）：必须喂给流并收尾——
+          // 原先 error 帧只查 _pending，流式 rid 的错误被静默丢弃，
+          // await for 永不结束 → 下载 UI 僵尸挂死、取消按钮失效
+          _streams.remove(rid);
+          _streamMeta.remove(rid);
+          if (!sc.isClosed) {
+            sc.addError(TransportException(
+              '${frame['code'] ?? 'relay/stream-error'}',
+              '${frame['message'] ?? '流式请求失败'}',
+            ));
+            sc.close();
+          }
+          return;
+        }
         if (sc != null && frame['type'] == 'http-res') {
           // 元数据帧：meta.contentLength/status → 进度 total + 续传判定
           // （载荷走二进制帧 _handleBinaryFrame；cl 可为 0——416/错误路径也要回调）
@@ -442,13 +460,9 @@ class RelayTransport extends DshTransport {
           // last 帧：收尾
           if (frame['last'] == true) {
             _streams.remove(rid);
+            _streamMeta.remove(rid);
             if (!sc.isClosed) sc.close();
           }
-          return;
-        }
-        if (sc != null && frame['type'] == 'http-res' && frame['last'] == true) {
-          _streams.remove(rid);
-          sc.close();
           return;
         }
         final c = _pending.remove(rid);
@@ -467,7 +481,10 @@ class RelayTransport extends DshTransport {
           return;
         }
         if (sc != null && text is String) {
-          debugPrint('[relay] << ws-frame rid=${frame['rid']} ${text.length > 110 ? text.substring(0, 110) : text}');
+          // 隧道帧含用户会话内容（prompt/工具输出）：release 下不打内容，只留长度
+          if (kDebugMode) {
+            debugPrint('[relay] << ws-frame rid=${frame['rid']} ${text.length > 110 ? text.substring(0, 110) : text}');
+          }
           sc.add(text);
         }
         return;
@@ -497,6 +514,16 @@ class RelayTransport extends DshTransport {
       if (!o.isCompleted) o.completeError(TransportException('relay/disconnected', 'relay 连接断开'));
     }
     _opening.clear();
+    // 流式下载与请求/响应同语义：跨连接不续传（二进制块流没有回放机制），立即失败——
+    // 否则 fetchToFile 的 await for 永不结束，下载面板僵尸挂死（mux 隧道走 _sockets 保活，不在此列）
+    for (final sc in _streams.values) {
+      if (!sc.isClosed) {
+        sc.addError(TransportException('relay/disconnected', 'relay 连接断开'));
+        sc.close();
+      }
+    }
+    _streams.clear();
+    _streamMeta.clear();
     _scheduleReconnect();
   }
 
@@ -605,7 +632,7 @@ class RelayTransport extends DshTransport {
     await _ensureConnected();
     final ws = _ws;
     if (ws == null) throw TransportException('relay/not-connected', '中继未连接');
-    final rid = '${DateTime.now().microsecondsSinceEpoch}-${_pending.length}';
+    final rid = '${DateTime.now().microsecondsSinceEpoch}-r${_ridSeq++}';
     final c = Completer<Map<String, dynamic>>();
     _pending[rid] = c;
     ws.add(jsonEncode({
@@ -613,10 +640,17 @@ class RelayTransport extends DshTransport {
       'rid': rid,
       'method': method,
       'path': path,
-      if (body != null) 'body': body,
+      'body': ?body,
       'headers': headers,
     }));
-    final frame = await c.future.timeout(const Duration(seconds: 30));
+    Map<String, dynamic> frame;
+    try {
+      frame = await c.future.timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      // 超时必须摘除：留着则条目永久滞留（泄漏 Completer，rid 也永不复用）
+      _pending.remove(rid);
+      rethrow;
+    }
     if (frame['type'] == 'error') {
       throw TransportException('${frame['code'] ?? 'relay/error'}', '${frame['message'] ?? ''}');
     }
@@ -643,8 +677,14 @@ class RelayTransport extends DshTransport {
     await _ensureConnected();
     final ws = _ws;
     if (ws == null) throw TransportException('relay/not-connected', '中继未连接');
-    final rid = '${DateTime.now().microsecondsSinceEpoch}-${_streams.length}';
-    final controller = StreamController<List<int>>();
+    final rid = '${DateTime.now().microsecondsSinceEpoch}-f${_ridSeq++}';
+    final controller = StreamController<List<int>>(
+      // 消费方取消（中断下载）即清理登记，防僵尸流残留
+      onCancel: () {
+        _streams.remove(rid);
+        _streamMeta.remove(rid);
+      },
+    );
     _streams[rid] = controller;
     _streamMeta[rid] = onMeta;
     ws.add(jsonEncode({
@@ -663,7 +703,7 @@ class RelayTransport extends DshTransport {
     await _ensureConnected();
     final ws = _ws;
     if (ws == null) throw TransportException('relay/not-connected', '中继未连接');
-    final rid = '${DateTime.now().microsecondsSinceEpoch}-s${_sockets.length}';
+    final rid = '${DateTime.now().microsecondsSinceEpoch}-s${_ridSeq++}';
     final sc = StreamController<String>();
     _sockets[rid] = sc;
     // 等桥的 __open__ 哨兵再返回：语义对齐 DirectTransport（返回即已建立）。

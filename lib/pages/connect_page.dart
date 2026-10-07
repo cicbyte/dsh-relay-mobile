@@ -81,13 +81,13 @@ class _ConnectPageState extends State<ConnectPage> {
       _busy = true;
       _error = null;
     });
+    DshTransport? built; // 成功半途的传输：失败路径要关掉，否则重连循环僵尸滞留
     try {
-      final DshTransport transport;
       final String modeLabel;
       if (!p.isRelay) {
         var raw = p.url.trim().replaceFirst(RegExp(r'/+$'), '');
         if (raw.isEmpty) throw TransportException('input/empty', '请填写服务地址');
-        transport = DirectTransport(Uri.parse(raw));
+        built = DirectTransport(Uri.parse(raw));
         modeLabel = '直连 · ${p.name}';
       } else {
         if (p.relay.trim().isEmpty)
@@ -108,9 +108,10 @@ class _ConnectPageState extends State<ConnectPage> {
           },
         );
         await relay.connect();
-        transport = relay;
+        built = relay;
         modeLabel = '云端转发 · ${p.name}';
       }
+      final transport = built;
 
       final client = DshClient(transport);
       var launch = _launchCtrl.text.trim();
@@ -135,6 +136,11 @@ class _ConnectPageState extends State<ConnectPage> {
       if (mounted && Navigator.of(context).canPop())
         Navigator.of(context).pop();
     } catch (e) {
+      // 半途失败：关掉已建立的传输——RelayTransport 自带自动重连循环，
+      // 不关则每点一次「连接」就多一个活跃连接 + 重连风暴（互相顶替）
+      try {
+        built?.close();
+      } catch (_) {}
       final msg = e is TransportException ? _friendlyError(e) : '$e';
       p.lastError = msg;
       await ProfileStore.save(_profiles);

@@ -300,7 +300,11 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
         await mux.connect();
       } catch (e) {
         debugPrint('[workspace] mux connect fail: $e');
-        return; // connect 失败也会走 mux 自动重连，成功后 onReconnected 补开流
+        // 首连失败不会武装自动重连（重连循环只在断线后由 _handleDisconnect 启动）：
+        // 必须 kick 进持续重连，否则首连失败后 workspace 流永久躺平
+        // （对齐 interactions/session_page 的处理；成功后 onReconnected 补开流）
+        mux.kick();
+        return;
       }
       _openWorkspaceFollow();
     }();

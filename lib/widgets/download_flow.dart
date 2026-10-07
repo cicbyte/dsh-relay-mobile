@@ -11,6 +11,33 @@ import '../dsh/download_client.dart';
 import '../dsh/dsh_client.dart';
 import '../main.dart';
 
+/// 对端下发的文件名消毒：basename 化（防路径穿越 ../、//绝对路径）、剥控制字符
+/// 与 Windows 保留字符、限长保扩展名；[existingDir] 给定目录时同名自动加 (n)
+/// 后缀（防覆盖已有下载）。
+String sanitizeFileName(String raw, {String? existingDir}) {
+  final parts = raw
+      .replaceAll('\\', '/')
+      .split('/')
+      .where((s) => s.isNotEmpty && s != '.')
+      .toList();
+  var n = parts.isNotEmpty ? parts.last : '';
+  n = n.replaceAll(RegExp(r'[\x00-\x1f\x7f<>:"|?*]'), '').trim();
+  if (n.isEmpty || n == '..') n = 'download.bin';
+  if (n.length > 120) n = n.substring(n.length - 120); // 保扩展名在尾部
+  var candidate = n;
+  var i = 0;
+  if (existingDir != null) {
+    while (File('$existingDir/$candidate').existsSync()) {
+      i++;
+      final dot = n.lastIndexOf('.');
+      candidate = dot > 0
+          ? '${n.substring(0, dot)} ($i)${n.substring(dot)}'
+          : '$n ($i)';
+    }
+  }
+  return candidate;
+}
+
 /// 共享文件区流程（双向共享模型）：手机 ⇄ 桌面（含 agent）的文件交换区——
 /// 工作区区 `<会话cwd>/.dsh-share` 与 全局区 `$DSH_HOME/.dsh-share`。
 /// 下行：手机下载区内文件（dl-create 强制区内路径，绕过 UI 也拿不到区外字节）。
@@ -487,7 +514,9 @@ class _DownloadSheetState extends State<_DownloadSheet> {
     try {
       // 落盘 app 私有目录（应用文档目录）
       final dir = await getApplicationDocumentsDirectory();
-      final dest = File('${dir.path}/${widget.fileName}');
+      // 对端下发的文件名消毒（路径穿越/控制字符/同名覆盖）
+      final safe = sanitizeFileName(widget.fileName, existingDir: dir.path);
+      final dest = File('${dir.path}/$safe');
       // 隧道流式（分块 + Range 断点续传）优先；直连不可用时回退 HttpClient。
       // total 由 fetchToFile 经 meta 帧算好传入（206 时 = 断点 + 剩余）。
       final ok = await DownloadClient(widget.client.downloadBase).fetchToFile(
@@ -547,8 +576,8 @@ class _DownloadSheetState extends State<_DownloadSheet> {
     setState(() => _savingDl = true);
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final loc =
-          await saveFileToDownloads('${dir.path}/${widget.fileName}', widget.fileName);
+      final safe = sanitizeFileName(widget.fileName, existingDir: dir.path);
+      final loc = await saveFileToDownloads('${dir.path}/$safe', safe);
       if (!mounted) return;
       setState(() {
         _savingDl = false;

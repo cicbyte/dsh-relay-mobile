@@ -48,6 +48,11 @@ class DshClient {
   Map<String, String> get _authHeaders => {if (cookie != null) 'cookie': cookie!};
 
   /// token 换签名 cookie。从 Set-Cookie 取 dsh-auth-*。
+  ///
+  /// 风险明示：token 走 URL query 是 dsh 网关的既有契约（launch token 即
+  /// 「带 token 的 URL」），token 会落进中间代理/服务端访问日志。缓解：令牌
+  /// 是一次性会话凭据、换取 cookie 后即失效；若未来 dsh 支持同名 header 传
+  /// token，此处应优先改 header。
   Future<String> authorize(String token) async {
     final resp = await transport.request('GET', '/?token=${Uri.encodeComponent(token)}');
     final auth = resp.setCookie.firstWhere(
@@ -666,7 +671,13 @@ class DshMux {
     if (_closed) return;
     _sock = null;
     for (final c in _streams.values) {
-      if (!c.isClosed) c.addError(DshRpcException('mux/disconnected', '流通道断开'));
+      if (!c.isClosed) {
+        c.addError(DshRpcException('mux/disconnected', '流通道断开'));
+        // addError 后立即收尾：只 addError 不 close 会让 controller/订阅
+        // 滞留到 GC（cancelOnError 订阅在错误送达后才解绑，但 controller 本体
+        // 若消费者用 onError 吞掉不 cancel，就永远留着）
+        c.close();
+      }
     }
     _streams.clear();
     _armRetry();

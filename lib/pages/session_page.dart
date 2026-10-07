@@ -179,6 +179,9 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   /// 「深度求索中…」秒级刷新用。
   Timer? _ticker;
 
+  /// 秒表刻度（秒）：只驱动订阅它的耗时标签，不再整页 setState
+  final ValueNotifier<int> _elapsedTick = ValueNotifier<int>(0);
+
   /// 上一帧的运行态（检测 运行→空闲 边沿，后台时弹完成通知）。
   bool _wasRunning = false;
 
@@ -278,9 +281,11 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       _openFollow();
       _syncHostRunning(); // 重连即对齐宿主运行位（后台错过的事件不再卡状态）
     };
+    // 秒表 tick 不再整页 setState（原先每秒全量重聚合渲染列表，长会话必掉帧）；
+    // 只有经过 ValueListenableBuilder 订阅的耗时标签（顶栏秒表）每秒刷新
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || !_running) return;
-      setState(() {});
+      _elapsedTick.value++;
       // 后台时把最新动作刷进进度通知（内容有变化才发，秒表由系统自己走）
       _syncBgProgressTick();
       // 运行中每 10s 向宿主复核运行位：异常收尾没有 turn/end 时自动解卡
@@ -291,34 +296,22 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     });
     _start();
     _syncHostRunning();
-    // 宿主投影控制流（session/control）：sessionStats/tokenUsage/contextPressure
-    // 的全量统计从这里实时下发（与桌面同源同口径），快照基线之外的增量也走它。
-    _startCtrlStream();
+    // 宿主投影控制流（session/control）已并入 follow mux：
+    // _start→_openFollow 里随队列 dock 一起开（连接成功/重连均自动补开）
   }
 
   // ---- 宿主投影（权威统计，桌面状态条同源）----
 
   /// 当前会话的投影值（key → value）。快照基线 + 控制流增量共同维护。
   final Map<String, dynamic> _projValues = {};
-  DshMux? _ctrlMux;
+  StreamSubscription<Map<String, dynamic>>? _ctrlProjSub;
 
-  void _startCtrlStream() async {
-    _ctrlMux = DshMux(widget.client, label: 'control');
-    _ctrlMux!.onReconnected = () {
-      _openCtrlStream();
-    };
-    try {
-      await _ctrlMux!.connect();
-      await _openCtrlStream();
-    } catch (_) {
-      // 控制流不可用（老版本宿主）：静默降级为记录折叠口径
-    }
-  }
-
-  Future<void> _openCtrlStream() async {
-    final mux = _ctrlMux;
-    if (mux == null) return;
-    mux.open('session/control', {}).listen(
+  /// 投影控制流：与队列 dock 同坐 follow mux（一条物理隧道多路复用逻辑流）。
+  /// 此前单独开 _ctrlMux 物理隧道——同一 session/control 开两条，
+  /// 双倍握手/心跳/重连风暴面。
+  void _openCtrlStream() {
+    _ctrlProjSub?.cancel();
+    _ctrlProjSub = _mux.open('session/control', {}).listen(
       (frame) {
         final type = '${frame['type']}';
         if (type == 'baseline') {
@@ -748,7 +741,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _jumpDebounce?.cancel();
-    _ctrlMux?.close();
+    _ctrlProjSub?.cancel();
     _sub?.cancel();
     _controlSub?.cancel();
     _inputCtrl.removeListener(_onInputChanged);
@@ -779,6 +772,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   void _openFollow() {
     _gotFrame = false;
     _openControl();
+    _openCtrlStream();
     _sub?.cancel();
     _sub = _mux
         .open('session/follow', {
@@ -832,6 +826,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             if (r is Map) {
               final rec = WireRecord.fromJson(Map<String, dynamic>.from(r));
               _records[rec.seq] = rec;
+              _recordsVersion++;
               _absorbPlan(rec);
             }
           }
@@ -844,6 +839,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           if (e is Map) {
             final rec = WireRecord.fromJson(Map<String, dynamic>.from(e));
             _records[rec.seq] = rec;
+            _recordsVersion++;
             _updateMinSeq();
             _absorbPlan(rec);
             // session/title：顶栏已实时反映（_displayTitle），这里借
@@ -973,17 +969,19 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         _hasMore = v['hasMore'] == true;
         _updateMinSeq();
       });
-      // 新记录 seq 更小、稳定排在前面：整体位移 = 新增条目数
-      final added = _itemCount - oldCount;
-      if (added > 0 && anchorIdx != null && _itemScrollCtrl.isAttached) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!_itemScrollCtrl.isAttached) return;
+      // 新记录 seq 更小、稳定排在前面：整体位移 = 新增条目数。
+      // added 必须在 build 之后取（_itemCount 在 _buildItems 尾部更新）——
+      // 此前在 build 前算恒为 0，翻页锚点失效、视口跳到顶部
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_itemScrollCtrl.isAttached) return;
+        final added = _itemCount - oldCount;
+        if (added > 0 && anchorIdx != null) {
           _itemScrollCtrl.jumpTo(
             index: (anchorIdx! + added).clamp(0, _itemCount - 1),
             alignment: anchorEdge.clamp(0.0, 1.0),
           );
-        });
-      }
+        }
+      });
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context)
@@ -1688,16 +1686,19 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 选附件：图片留 base64 直传；其他文件即刻上传拿 receiptId。
+  /// 选附件：图片留 base64 直传；小文件即刻上传拿 receiptId；
+  /// 大文件不进内存（此前 withData:true 整包进 RAM + 单 RPC base64 无上限），
+  /// 引导走共享区分块上传通道。
   Future<void> _pickFiles() async {
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
-      withData: true,
+      withData: false, // 逐文件按需读，不做整包预载
     );
     if (result == null) return;
+    // 会话内联上传走单 RPC（base64 有 1.37x 膨胀），上限 2MB；
+    // 更大的文件走「共享区」分块上传（256KB/块，agent 同样可直接读取）
+    const inlineMax = 2 * 1024 * 1024;
     for (final f in result.files) {
-      final bytes = f.bytes;
-      if (bytes == null) continue;
       final name = f.name;
       final lower = name.toLowerCase();
       final isImage =
@@ -1706,6 +1707,24 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           lower.endsWith('.jpeg') ||
           lower.endsWith('.webp') ||
           lower.endsWith('.gif');
+      if (!isImage && f.size > inlineMax) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            '$name 过大（${(f.size / 1024 / 1024).toStringAsFixed(1)}MB）：'
+            '请在「共享区」上传（agent 可直接读取该目录）',
+          ),
+        ));
+        continue;
+      }
+      final path = f.path;
+      if (path == null || path.isEmpty) continue;
+      final Uint8List bytes;
+      try {
+        bytes = await File(path).readAsBytes();
+      } catch (_) {
+        continue;
+      }
       if (isImage) {
         setState(
           () =>
@@ -2090,9 +2109,37 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
 
   // ---------- 渲染 ----------
 
-  List<WireRecord> get _sorted =>
-      (_records.values.toList()..sort((a, b) => a.seq.compareTo(b.seq)));
+  /// 记录版本号：任何插入自增（缓存失效依据；records 只增不删）
+  int _recordsVersion = 0;
+  List<WireRecord>? _sortedCache;
+  int? _sortedCacheVersion;
 
+  /// 排序后的记录（按版本记忆化：流式高频重建时不再每帧全量排序）
+  List<WireRecord> get _sorted {
+    if (_sortedCache == null || _sortedCacheVersion != _recordsVersion) {
+      _sortedCache = (_records.values.toList()
+        ..sort((a, b) => a.seq.compareTo(b.seq)));
+      _sortedCacheVersion = _recordsVersion;
+    }
+    return _sortedCache!;
+  }
+
+  /// 聚合结果缓存：以记录版本为键。记录未变时（如秒表 tick、键盘弹出等
+  /// 无关 setState）直接复用上一轮 widget 列表，重聚合（JSON 解析/工具配对/
+  /// 轮次推导/全量建 widget）只发生在真有新记录时。
+  List<Widget>? _itemsCache;
+  int? _itemsCacheVersion;
+
+  List<Widget> _buildItems(List<WireRecord> records) {
+    final cached = _itemsCache;
+    if (cached != null && _itemsCacheVersion == _recordsVersion) {
+      return cached;
+    }
+    final items = _aggregateItems(records);
+    _itemsCache = items;
+    _itemsCacheVersion = _recordsVersion;
+    return items;
+  }
 
   /// 工作区文件浏览：以本会话 cwd 为根（服务端按会话解析并约束越界）。
   void _openWorkspace() {
@@ -2137,7 +2184,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
   /// records → widgets 两遍聚合：
   ///  ① tool/call（事件或 assistant 的 tool-call 块）与 tool/result 按 callId 配对成一张卡；
   ///  ② ignorable 协议噪声过滤、reasoning 折叠、系统事件胶囊化。
-  List<Widget> _buildItems(List<WireRecord> records) {
+  List<Widget> _aggregateItems(List<WireRecord> records) {
     final tools = <String, ToolEntry>{};
     final order = <ToolEntry>[]; // 调用顺序（FIFO 兜底配对用）
 
@@ -2339,7 +2386,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             if (e.hasResult && !e.isError) {
               final p = mutationPath(e.name, e.arguments);
               if (p != null) {
-                final (add, del) = editLineDelta(e.name, e.arguments);
+                final (add, del) = e.editDelta();
                 noteProduced(curTurn, p, add, del);
               }
             }
@@ -2357,7 +2404,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             if (e.hasResult && !e.isError) {
               final p = mutationPath(e.name, e.arguments);
               if (p != null) {
-                final (add, del) = editLineDelta(e.name, e.arguments);
+                final (add, del) = e.editDelta();
                 noteProduced(curTurn, p, add, del);
               }
             }
@@ -2702,9 +2749,19 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                       ),
                       const SizedBox(width: 7),
                       Text(
-                        '深度求索中… ${_elapsedLabel}',
+                        '深度求索中…',
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      ValueListenableBuilder<int>(
+                        valueListenable: _elapsedTick,
+                        builder: (context, tick, child) => Text(
+                          _elapsedLabel,
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
                         ),
                       ),
                     ],

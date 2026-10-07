@@ -47,6 +47,7 @@ class ToolEntry {
   bool emitted = false;
   int? callMs; // tool/call 时间（epoch ms）
   int? resultMs; // tool/result 时间
+  (int, int)? _editDelta; // 变更行数缓存（LCS 只算一次）
 
   int? get durationMs =>
       (callMs != null && resultMs != null) ? resultMs! - callMs! : null;
@@ -59,6 +60,10 @@ class ToolEntry {
       argSummary = _argSummary(this.name, args);
     }
   }
+
+  /// 变更行数（懒算一次）：会话页每次重聚合都会取，LCS 不再反复跑
+  ///（参数不变，结果不变）。
+  (int, int) editDelta() => _editDelta ??= editLineDelta(name, arguments);
 }
 
 // ---- 工具行呈现（对齐桌面 ui-tool：变体 → 图标/标题/摘要）----

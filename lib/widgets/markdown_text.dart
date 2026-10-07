@@ -8,7 +8,12 @@ import 'package:markdown/markdown.dart' as md;
 /// 支持：标题、段落、**加粗**/斜体/~~删除线~~、行内代码、围栏/缩进代码块、
 /// 有序/无序（嵌套）列表、任务列表、引用、表格、链接、分割线、@提及/自动链接。
 /// 链接点击复制到剪贴板（零依赖交互，不引 url_launcher）。
-class MarkdownText extends StatelessWidget {
+///
+/// 性能：MarkdownBody 的 build 每次都重新解析全文；流式会话里每秒重建一次
+/// 列表时这是大头。这里按 (data, brightness) 缓存已构建的子树实例——父组件
+/// 重建时返回同一实例，Flutter 对 identical 子树直接复用不重 build。
+/// 亮暗切换或文本变化时才真正重解析。
+class MarkdownText extends StatefulWidget {
   final String data;
 
   /// 气泡内略缩小字号。
@@ -17,11 +22,26 @@ class MarkdownText extends StatelessWidget {
   const MarkdownText(this.data, {super.key, this.compact = true});
 
   @override
+  State<MarkdownText> createState() => _MarkdownTextState();
+}
+
+class _MarkdownTextState extends State<MarkdownText> {
+  String? _cachedData;
+  Brightness? _cachedBrightness;
+  Widget? _cached;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final brightness = scheme.brightness;
+    if (_cached != null &&
+        _cachedData == widget.data &&
+        _cachedBrightness == brightness) {
+      return _cached!;
+    }
     final base = (theme.textTheme.bodyMedium ?? const TextStyle(fontSize: 14))
-        .copyWith(fontSize: compact ? 14.5 : 15, height: 1.55);
+        .copyWith(fontSize: widget.compact ? 14.5 : 15, height: 1.55);
     const mono = TextStyle(
       fontFamily: 'monospace',
       fontFamilyFallback: ['Consolas', 'Courier New'],
@@ -65,8 +85,10 @@ class MarkdownText extends StatelessWidget {
       a: base.copyWith(color: scheme.primary, decoration: TextDecoration.underline),
     );
 
-    return MarkdownBody(
-      data: data,
+    _cachedData = widget.data;
+    _cachedBrightness = brightness;
+    _cached = MarkdownBody(
+      data: widget.data,
       extensionSet: md.ExtensionSet.gitHubWeb, // 表格/删除线/自动链接/@提及
       styleSheet: style,
       softLineBreak: true,
@@ -79,5 +101,6 @@ class MarkdownText extends StatelessWidget {
         }
       },
     );
+    return _cached!;
   }
 }
