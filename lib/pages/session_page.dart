@@ -2391,14 +2391,27 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     final responses = <int, String>{};
     final turnStartIdx = <int, int>{};
     final idxTurn = <int>[];
-    // 轮尾文件概览（桌面 deliverables 同式）：轮内成功的 write/edit 变更路径
-    final turnProduced = <int, List<String>>{};
+    // 轮尾文件概览（桌面 deliverables 同式）：轮内成功的 write/edit 变更
+    // 路径 + 行级增删计数（编辑参数本地 diff），同文件多编辑累加
+    final turnProduced = <int, List<_TurnEdit>>{};
     final flushedTurns = <int>{};
     var lastAttributedTurn = -1;
-    void noteProduced(int turn, String? path) {
+    void noteProduced(int turn, String? path, int added, int deleted) {
       if (path == null || turn == 0) return;
-      final list = turnProduced.putIfAbsent(turn, () => <String>[]);
-      if (!list.contains(path)) list.add(path);
+      final list = turnProduced.putIfAbsent(turn, () => <_TurnEdit>[]);
+      _TurnEdit? e;
+      for (final x in list) {
+        if (x.path == path) {
+          e = x;
+          break;
+        }
+      }
+      if (e == null) {
+        e = _TurnEdit(path);
+        list.add(e);
+      }
+      e.added += added;
+      e.deleted += deleted;
     }
 
     /// 进入新轮前把上一轮的概览卡落盘（归属上一轮，轮尾即位）。
@@ -2410,7 +2423,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       }
       flushedTurns.add(turn);
       return _ChangedFilesCard(
-        paths: turnProduced[turn]!,
+        edits: turnProduced[turn]!,
         onOpenFile: _openWorkspaceFilePath,
       );
     }
@@ -2507,10 +2520,11 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
             e.emitted = true;
             // 变更工具成功结果 → 记入本轮产出（桌面 deliverables 口径）
             if (e.hasResult && !e.isError) {
-              noteProduced(
-                curTurn,
-                _mutationPath(e.name, e.arguments),
-              );
+              final p = _mutationPath(e.name, e.arguments);
+              if (p != null) {
+                final (add, del) = _editLineDelta(e.name, e.arguments);
+                noteProduced(curTurn, p, add, del);
+              }
             }
             out.add(_ToolCallCard(entry: e));
           }
@@ -2524,10 +2538,11 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           if (!e.emitted) {
             e.emitted = true;
             if (e.hasResult && !e.isError) {
-              noteProduced(
-                curTurn,
-                _mutationPath(e.name, e.arguments),
-              );
+              final p = _mutationPath(e.name, e.arguments);
+              if (p != null) {
+                final (add, del) = _editLineDelta(e.name, e.arguments);
+                noteProduced(curTurn, p, add, del);
+              }
             }
             out.add(_ToolCallCard(entry: e));
           }
@@ -4190,7 +4205,93 @@ String _argSummary(String toolName, String raw) {
   }
 }
 
-  /// 一次性变更工具（write/edit/str_replace_editor）的变更路径提取
+  /// 一轮内单个文件的变更计数（编辑参数本地行级 diff，非宿主 git 摘要）。
+class _TurnEdit {
+  final String path;
+  int added = 0;
+  int deleted = 0;
+  _TurnEdit(this.path);
+}
+
+/// 行级 LCS 增删计数（编辑片段规模小，O(n·m) 足够；超限退化为净变化）。
+(int, int) _diffLineCounts(String oldText, String newText) {
+  final a = oldText.split('\n');
+  final b = newText.split('\n');
+  while (a.isNotEmpty && a.last.trim().isEmpty) {
+    a.removeLast();
+  }
+  while (b.isNotEmpty && b.last.trim().isEmpty) {
+    b.removeLast();
+  }
+  final n = a.length;
+  final m = b.length;
+  if (n * m > 4000000) {
+    final d = m - n;
+    return (d > 0 ? d : 0, d < 0 ? -d : 0);
+  }
+  final dp = List.generate(n + 1, (_) => List.filled(m + 1, 0));
+  for (var i = n - 1; i >= 0; i--) {
+    final ai = a[i];
+    final dpi = dp[i];
+    final dpi1 = dp[i + 1];
+    for (var j = m - 1; j >= 0; j--) {
+      dpi[j] = ai == b[j]
+          ? dpi1[j + 1] + 1
+          : (dpi1[j] >= dpi[j + 1] ? dpi1[j] : dpi[j + 1]);
+    }
+  }
+  final common = dp[0][0];
+  return (m - common, n - common);
+}
+
+int _lineCount(String s) {
+  final t = s.endsWith('\n') ? s.substring(0, s.length - 1) : s;
+  if (t.trim().isEmpty) return 0;
+  return t.split('\n').length;
+}
+
+/// 从变更工具参数估算行增删：write/create 全量 +N；edit/str_replace 走
+/// 行级 diff；insert 只计新增。返回 (added, deleted)。
+(int, int) _editLineDelta(String name, String argsRaw) {
+  Map<String, dynamic>? args;
+  try {
+    final v = jsonDecode(argsRaw);
+    if (v is Map<String, dynamic>) args = v;
+  } catch (_) {
+    return (0, 0);
+  }
+  String? str(Object? v) => v is String ? v : null;
+  switch (name) {
+    case 'write':
+      final c = str(args?['content']);
+      return c == null ? (0, 0) : (_lineCount(c), 0);
+    case 'edit':
+      final o = str(args?['old_string']);
+      final w = str(args?['new_string']);
+      if (o == null || w == null) return (0, 0);
+      return _diffLineCounts(o, w);
+    case 'str_replace_editor':
+      switch (args?['command']) {
+        case 'create':
+          final c = str(args?['file_text']);
+          return c == null ? (0, 0) : (_lineCount(c), 0);
+        case 'str_replace':
+          final o = str(args?['old_str']);
+          final w = str(args?['new_str']);
+          if (o == null || w == null) return (0, 0);
+          return _diffLineCounts(o, w);
+        case 'insert':
+          final w = str(args?['new_str']);
+          return w == null ? (0, 0) : (_lineCount(w), 0);
+        default:
+          return (0, 0);
+      }
+    default:
+      return (0, 0);
+  }
+}
+
+/// 一次性变更工具（write/edit/str_replace_editor）的变更路径提取
 /// （桌面 turn-deliverables mutationPath 同式；仅完整合法调用算产出）。
 String? _mutationPath(String name, String argsRaw) {
   Map<String, dynamic>? args;
@@ -4235,11 +4336,12 @@ String? _mutationPath(String name, String argsRaw) {
 }
 
 /// 轮尾文件概览卡（桌面 ChangedFiles 同款文案）：「已编辑 N 个文件」/
-/// 「已编辑 {名}」，点按折叠展开完整清单；行点按进工作区文件阅读页。
+/// 「已编辑 {名}」+ 行级增删（编辑参数本地 diff，同 git 摘要的绿/红呈现）；
+/// 点按折叠展开完整清单；行点按进工作区文件阅读页。
 class _ChangedFilesCard extends StatefulWidget {
-  final List<String> paths;
+  final List<_TurnEdit> edits;
   final void Function(String path)? onOpenFile;
-  const _ChangedFilesCard({required this.paths, this.onOpenFile});
+  const _ChangedFilesCard({required this.edits, this.onOpenFile});
 
   @override
   State<_ChangedFilesCard> createState() => _ChangedFilesCardState();
@@ -4252,8 +4354,8 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final paths = widget.paths;
-    final single = paths.length == 1 ? paths.first : null;
+    final edits = widget.edits;
+    final single = edits.length == 1 ? edits.first : null;
     String base(String p) {
       final norm = p.replaceAll('\\', '/');
       final i = norm.lastIndexOf('/');
@@ -4262,9 +4364,28 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
 
     void open(String p) => widget.onOpenFile?.call(p);
 
-    final preview = paths.take(3).map(base).join('、');
-    final rest = paths.length - 3;
+    Widget counts(int added, int deleted, {double? alpha}) {
+      if (added == 0 && deleted == 0) return const SizedBox.shrink();
+      final a = alpha ?? 1.0;
+      return Text(
+        [
+          if (added > 0) '+$added',
+          if (deleted > 0) '−$deleted',
+        ].join(' '),
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: deleted > 0
+              ? scheme.error.withValues(alpha: a)
+              : Colors.green.shade600.withValues(alpha: a),
+        ),
+      );
+    }
+
+    final preview =
+        edits.take(3).map((e) => base(e.path)).join('、');
+    final rest = edits.length - 3;
     final canOpen = widget.onOpenFile != null;
+    final totalAdded = edits.fold<int>(0, (s, e) => s + e.added);
+    final totalDeleted = edits.fold<int>(0, (s, e) => s + e.deleted);
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 2, 14, 6),
       child: Material(
@@ -4273,8 +4394,8 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: single != null && canOpen
-              ? () => open(single)
-              : paths.length > 1
+              ? () => open(single.path)
+              : edits.length > 1
                   ? () => setState(() => _expanded = !_expanded)
                   : null,
           child: Padding(
@@ -4291,30 +4412,42 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        single != null ? '已编辑 ${base(single)}' : '已编辑 ${paths.length} 个文件',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: canOpen && single != null
-                              ? scheme.primary
-                              : null,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              single != null
+                                  ? '已编辑 ${base(single.path)}'
+                                  : '已编辑 ${edits.length} 个文件',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: canOpen && single != null
+                                    ? scheme.primary
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          counts(
+                              single?.added ?? totalAdded,
+                              single?.deleted ?? totalDeleted),
+                        ],
                       ),
-                      if (paths.length > 1 && !_expanded)
+                      if (edits.length > 1 && !_expanded)
                         Text(
-                          rest > 0 ? '$preview 等 ${paths.length} 个' : preview,
+                          rest > 0 ? '$preview 等 ${edits.length} 个' : preview,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
                           ),
                         ),
-                      if (paths.length > 1 && _expanded)
-                        for (final p in paths)
+                      if (edits.length > 1 && _expanded)
+                        for (final e in edits)
                           InkWell(
-                            onTap: canOpen ? () => open(p) : null,
+                            onTap: canOpen ? () => open(e.path) : null,
                             child: Padding(
                               padding:
                                   const EdgeInsets.symmetric(vertical: 1.5),
@@ -4329,7 +4462,7 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
                                   const SizedBox(width: 5),
                                   Expanded(
                                     child: Text(
-                                      base(p),
+                                      base(e.path),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: theme.textTheme.labelSmall
@@ -4341,6 +4474,8 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
                                       ),
                                     ),
                                   ),
+                                  const SizedBox(width: 6),
+                                  counts(e.added, e.deleted, alpha: 0.9),
                                 ],
                               ),
                             ),
@@ -4348,7 +4483,7 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
                     ],
                   ),
                 ),
-                if (paths.length > 1)
+                if (edits.length > 1)
                   Icon(
                     _expanded ? Icons.expand_less : Icons.expand_more,
                     size: 15,
