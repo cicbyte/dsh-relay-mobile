@@ -6,6 +6,7 @@ import 'dsh/dsh_client.dart';
 import 'dsh/interactions.dart';
 import 'dsh/profiles.dart';
 import 'dsh/transport.dart';
+import 'pages/host_status_page.dart';
 import 'pages/session_page.dart';
 import 'pages/settings_page.dart';
 import 'theme.dart';
@@ -519,6 +520,17 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
           tabIndex.value = 1;
           rootScaffoldKey.currentState?.closeDrawer();
         },
+        onOpenHostStatus: () {
+          rootScaffoldKey.currentState?.closeDrawer();
+          final c = _client;
+          if (c == null) return;
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => HostStatusPage(
+              client: c,
+              deviceId: _activeDeviceId.isEmpty ? 'direct' : _activeDeviceId,
+            ),
+          ));
+        },
       ),
       body: ValueListenableBuilder<int>(
         valueListenable: tabIndex,
@@ -587,6 +599,7 @@ class DshDrawer extends StatelessWidget {
   final void Function(SessionSummary) onArchivedTap;
   final VoidCallback onRefresh;
   final VoidCallback onNewSession;
+  final VoidCallback onOpenHostStatus;
   final VoidCallback onOpenSettings;
 
   const DshDrawer({
@@ -607,6 +620,7 @@ class DshDrawer extends StatelessWidget {
     required this.onRefresh,
     required this.onNewSession,
     required this.onOpenSettings,
+    required this.onOpenHostStatus,
   });
 
   @override
@@ -699,6 +713,7 @@ class DshDrawer extends StatelessWidget {
               ),
               entryRow(Icons.settings_outlined, '设置', onOpenSettings),
               entryRow(Icons.add_comment_outlined, '新建会话', onNewSession),
+              entryRow(Icons.monitor_outlined, '宿主状态', onOpenHostStatus),
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                 child: Divider(height: 1),

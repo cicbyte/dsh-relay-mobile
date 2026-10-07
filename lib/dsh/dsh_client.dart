@@ -122,6 +122,50 @@ class DshClient {
     }
   }
 
+  /// 宿主状态看板（进程/窗口清单 + capabilities 平台能力协商）。
+  /// 插件旧版本/路由不可用返回 null（调用方给「插件过旧」降级提示）。
+  Future<Map<String, dynamic>?> hostStatus() async {
+    try {
+      final resp = await transport.request('GET', '/mobile-bridge/host-status');
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 按窗口截图：PNG 落宿主共享区并返回下载链接 { downloadId, name, size }。
+  /// 路由不可用返回 null；桥端业务错误（黑帧/权限等）抛 DshRpcException 带文案。
+  Future<Map<String, dynamic>?> windowCapture(String winId,
+      {required String deviceId}) async {
+    try {
+      final resp = await transport.request(
+        'POST',
+        '/mobile-bridge/window-capture',
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'x-device-id': deviceId,
+        },
+        body: jsonEncode({'id': winId, 'deviceId': deviceId}),
+      );
+      if (resp.status != 200 || resp.body.isEmpty) return null;
+      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (j['code'] == 200 && j['result'] is Map) {
+        return Map<String, dynamic>.from(j['result']);
+      }
+      throw DshRpcException(
+          'window-capture', '${j['message'] ?? '抓取失败'}');
+    } on DshRpcException {
+      rethrow;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 流式下载的可达 HTTP base（直连=宿主 / 隧道=relay）。
   Uri get downloadBase => transport.downloadBase;
 
