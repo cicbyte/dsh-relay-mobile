@@ -17,6 +17,7 @@ import '../widgets/download_flow.dart';
 import '../widgets/markdown_text.dart';
 import '../widgets/turn_rail.dart';
 import 'trajectory_page.dart';
+import 'workspace_page.dart';
 
 /// 会话页：session/follow（快照+事件订阅）渲染对话，session/prompt 发消息。
 class SessionPage extends StatefulWidget {
@@ -2155,6 +2156,31 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
     return const Text('[图片]');
   }
 
+  /// 工作区文件浏览：以本会话 cwd 为根（服务端按会话解析并约束越界）。
+  void _openWorkspace() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => WorkspacePage(
+        client: widget.client,
+        sessionId: widget.summary.sessionId,
+        title: widget.summary.title,
+        cwd: widget.summary.cwd,
+      ),
+    ));
+  }
+
+  /// 轮尾「已编辑」卡点入：直接打开该文件的阅读页（绝对路径由服务端定位）。
+  void _openWorkspaceFilePath(String path) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => WorkspacePage(
+        client: widget.client,
+        sessionId: widget.summary.sessionId,
+        title: widget.summary.title,
+        cwd: widget.summary.cwd,
+        initialPath: path,
+      ),
+    ));
+  }
+
   /// 消息块（对齐桌面：无「你/助手」文字标签——用户=右对齐气泡，
   /// 助手=左对齐纯内容流；时间/用量/复制收纳成小字 meta 行）。
   Widget _messageBubble({
@@ -2383,7 +2409,10 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         return null;
       }
       flushedTurns.add(turn);
-      return _ChangedFilesCard(paths: turnProduced[turn]!);
+      return _ChangedFilesCard(
+        paths: turnProduced[turn]!,
+        onOpenFile: _openWorkspaceFilePath,
+      );
     }
 
     for (final r in records) {
@@ -3127,6 +3156,13 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
                 color: Theme.of(context).colorScheme.error,
               ),
             ),
+          // 工作区文件浏览：本会话 cwd 为根，逐层下钻 + 文件阅读
+          // （已编辑卡点入的落点也在这条链路上）。
+          IconButton(
+            tooltip: '工作区文件',
+            icon: const Icon(Icons.folder_open_outlined),
+            onPressed: _openWorkspace,
+          ),
           // 低频操作收进溢出菜单：计划模式开关在输入卡 + 面板里
           // （激活时输入框上方有「计划 · 开」chip，状态不丢）。
           PopupMenuButton<String>(
@@ -4199,10 +4235,11 @@ String? _mutationPath(String name, String argsRaw) {
 }
 
 /// 轮尾文件概览卡（桌面 ChangedFiles 同款文案）：「已编辑 N 个文件」/
-/// 「已编辑 {名}」，点按折叠展开完整清单。
+/// 「已编辑 {名}」，点按折叠展开完整清单；行点按进工作区文件阅读页。
 class _ChangedFilesCard extends StatefulWidget {
   final List<String> paths;
-  const _ChangedFilesCard({required this.paths});
+  final void Function(String path)? onOpenFile;
+  const _ChangedFilesCard({required this.paths, this.onOpenFile});
 
   @override
   State<_ChangedFilesCard> createState() => _ChangedFilesCardState();
@@ -4223,8 +4260,11 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
       return i == -1 ? norm : norm.substring(i + 1);
     }
 
+    void open(String p) => widget.onOpenFile?.call(p);
+
     final preview = paths.take(3).map(base).join('、');
     final rest = paths.length - 3;
+    final canOpen = widget.onOpenFile != null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 2, 14, 6),
       child: Material(
@@ -4232,7 +4272,11 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
-          onTap: paths.length <= 1 ? null : () => setState(() => _expanded = !_expanded),
+          onTap: single != null && canOpen
+              ? () => open(single)
+              : paths.length > 1
+                  ? () => setState(() => _expanded = !_expanded)
+                  : null,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: Row(
@@ -4253,21 +4297,54 @@ class _ChangedFilesCardState extends State<_ChangedFilesCard> {
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.labelMedium?.copyWith(
                           fontWeight: FontWeight.w600,
+                          color: canOpen && single != null
+                              ? scheme.primary
+                              : null,
                         ),
                       ),
-                      if (paths.length > 1)
+                      if (paths.length > 1 && !_expanded)
                         Text(
-                          _expanded
-                              ? paths.map(base).join('\n')
-                              : rest > 0
-                                  ? '$preview 等 ${paths.length} 个'
-                                  : preview,
-                          maxLines: _expanded ? paths.length : 1,
+                          rest > 0 ? '$preview 等 ${paths.length} 个' : preview,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
                           ),
                         ),
+                      if (paths.length > 1 && _expanded)
+                        for (final p in paths)
+                          InkWell(
+                            onTap: canOpen ? () => open(p) : null,
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 1.5),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.description_outlined,
+                                    size: 12,
+                                    color: scheme.onSurfaceVariant
+                                        .withValues(alpha: 0.7),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Expanded(
+                                    child: Text(
+                                      base(p),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                        color: canOpen
+                                            ? scheme.primary
+                                            : scheme.onSurfaceVariant
+                                                .withValues(alpha: 0.8),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                     ],
                   ),
                 ),

@@ -517,6 +517,28 @@ class DshClient {
         'parentSessionId': parentSessionId,
         'mode': 'continuable',
       });
+
+  // ---- 工作区文件（workspaceFiles/*：scope 在 wire 上就是会话 id，
+  // 服务端按会话 cwd 解析工作区根并约束越界；已实测中继透传可用）----
+
+  /// workspaceFiles/list：列目录。path 相对会话 cwd（'.'=根）或绝对路径。
+  /// → { path, entries: [{name, type: 'file'|'directory', size?}], truncated }。
+  Future<Map<String, dynamic>> workspaceFileList(String sessionId, String path) =>
+      rpc('workspaceFiles/list', {
+        'workspaceFileScopeId': sessionId,
+        'path': path,
+      });
+
+  /// workspaceFiles/read：读文本一页。offset 从 1 起（服务端 1-based），limit ≤5000。
+  /// → { absolutePath, version, bytes, offset, text, lines, eof }。
+  Future<Map<String, dynamic>> workspaceFileRead(
+          String sessionId, String path,
+          {int offset = 1, int limit = 2000}) =>
+      rpc('workspaceFiles/read', {
+        'workspaceFileScopeId': sessionId,
+        'path': path,
+        'range': {'offset': offset, 'limit': limit},
+      });
 }
 
 /// SessionAddress：普通会话 `{kind:'session', sessionId}`；
