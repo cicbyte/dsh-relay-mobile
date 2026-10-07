@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 
@@ -825,9 +826,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           for (final r in (frame['records'] as List? ?? [])) {
             if (r is Map) {
               final rec = WireRecord.fromJson(Map<String, dynamic>.from(r));
-              _records[rec.seq] = rec;
-              _recordsVersion++;
-              _absorbPlan(rec);
+              _absorbRecord(rec);
             }
           }
           _updateMinSeq();
@@ -838,10 +837,8 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           final e = frame['event'];
           if (e is Map) {
             final rec = WireRecord.fromJson(Map<String, dynamic>.from(e));
-            _records[rec.seq] = rec;
-            _recordsVersion++;
+            _absorbRecord(rec);
             _updateMinSeq();
-            _absorbPlan(rec);
             // session/title：顶栏已实时反映（_displayTitle），这里借
             // onSessionEnded 钩子刷新侧栏/列表的标题。
             if (rec.type == 'session/title') {
@@ -881,6 +878,17 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
       return;
     }
     _minSeq = _records.keys.reduce((a, b) => a < b ? a : b);
+  }
+
+  /// `_records` 的唯一写入口：新 seq 插入时 bump `_recordsVersion`，让
+  /// `_sorted`/`_buildItems` 缓存（按版本失效）跟着刷新。
+  /// 此前有三个分散写点，`_loadEarlier` 的 putIfAbsent 漏 bump 导致翻页加载
+  /// 的历史永不渲染（第二轮审查 #914）——收敛到一处杜绝第四写点再犯。
+  void _absorbRecord(WireRecord rec) {
+    final before = _records.length;
+    _records[rec.seq] = rec;
+    if (_records.length != before) _recordsVersion++;
+    _absorbPlan(rec);
   }
 
   void _scrollToBottom() {
@@ -962,8 +970,7 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
         for (final r in (v['records'] as List? ?? [])) {
           if (r is Map) {
             final rec = WireRecord.fromJson(Map<String, dynamic>.from(r));
-            _records.putIfAbsent(rec.seq, () => rec);
-            _absorbPlan(rec);
+            _absorbRecord(rec);
           }
         }
         _hasMore = v['hasMore'] == true;
@@ -1707,7 +1714,11 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
           lower.endsWith('.jpeg') ||
           lower.endsWith('.webp') ||
           lower.endsWith('.gif');
-      if (!isImage && f.size > inlineMax) {
+      // 图片放宽到 10MB：内联进消息给模型看是核心 UX（相机原图/全景可到
+      // 数十 MB，同样整包进内存 + base64 膨胀，不能无上限——#921）；
+      // 超限图片与普通文件一样引导走共享区（后续可加压缩后内联）
+      const imageMax = 10 * 1024 * 1024;
+      if (f.size > (isImage ? imageMax : inlineMax)) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
@@ -2775,10 +2786,14 @@ class _SessionPageState extends State<SessionPage> with WidgetsBindingObserver {
               final pending = InteractionCenter.I.forAgent(
                 widget.summary.sessionId,
               );
-              debugPrint(
-                '[page] vlb pending=${pending?.eventId ?? "null"} '
-                'agent=${widget.summary.sessionId}',
-              );
+              // 每 build 都打 sessionId：release 落 logcat 形成噪声+信息泄漏，
+              // 包 kDebugMode（对齐 transport <<ws-frame 的做法）
+              if (kDebugMode) {
+                debugPrint(
+                  '[page] vlb pending=${pending?.eventId ?? "null"} '
+                  'agent=${widget.summary.sessionId}',
+                );
+              }
               if (pending != null) {
                 // 与输入框同配方：普通子级 + 内容自适应。作答卡内部自己限高
                 // （键盘感知），保证提交按钮行永远可见。

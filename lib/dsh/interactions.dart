@@ -5,6 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'dsh_client.dart';
 import 'transport.dart';
 
+/// $events 诊断日志：release 不输出（对齐 transport 日志卫生，#921）
+void _eventLog(String msg) {
+  if (kDebugMode) debugPrint('[events] $msg');
+}
+
 /// 一条待处理的人机交互（询问 / 授权），来自 `$events` Remote 事件流的
 /// `waterfall` 帧（host Cordis waterfall 的远端呈现）。
 class PendingInteraction {
@@ -58,27 +63,31 @@ class InteractionCenter {
   /// 幂等启动：同一 [DshTransport] 只建一次 `$events` 流。
   void ensureStarted(DshClient client) {
     if (_startedFor == client.transport && _mux != null) return;
+    // 换 transport 必须关旧 mux：旧 mux 挂在已关闭的旧 transport 上，
+    // _attemptReconnect 会对 relay/closed 无限空转重连（空耗电+日志噪声），
+    // 多次换线还会叠加堆积（第二轮审查 #918）
+    _mux?.close();
     _sub?.cancel();
     _startedFor = client.transport;
     _client = client;
     _byId.clear();
     _notify();
-    debugPrint('[events] ensureStarted: create mux');
+    _eventLog('ensureStarted: create mux');
     final mux = DshMux(client, label: 'events');
     _mux = mux;
     mux.onReconnected = () {
-      debugPrint('[events] onReconnected → reopen stream');
+      _eventLog('onReconnected → reopen stream');
       _openStream();
     };
     mux.connect().then((_) {
-      debugPrint('[events] mux connect ok');
+      _eventLog('mux connect ok');
       _openStream();
     }).catchError((Object e) {
       // 初始连接失败：必须 kick 进持续重连循环（成功后 onReconnected 补开流）。
       // 此前静默吞掉——mux 从未建立时 _handleDisconnect 不会触发、无任何重试，
       // $events 永久躺平：follow 流（进会话页才连）照常收记录，于是
       // 「询问/计划以平铺卡片显示、但没有可交互的作答卡」。
-      debugPrint('[events] mux connect fail → kick: $e');
+      _eventLog('mux connect fail → kick: $e');
       mux.kick();
     });
   }
@@ -89,7 +98,7 @@ class InteractionCenter {
   void _openStream() {
     final mux = _mux;
     if (mux == null || !mux.isConnected) {
-      debugPrint('[events] openStream skip (null=${mux == null}, connected=${mux?.isConnected})');
+      _eventLog('openStream skip (null=${mux == null}, connected=${mux?.isConnected})');
       return;
     }
     _sub?.cancel();
@@ -97,20 +106,20 @@ class InteractionCenter {
       _onItem,
       onError: (Object e) {
         // 流断开；重连后 onReconnected 补开，pending 由服务端补投
-        debugPrint('[events] stream error: $e');
+        _eventLog('stream error: $e');
       },
       cancelOnError: false,
     );
-    debugPrint('[events] stream opened');
+    _eventLog('stream opened');
   }
 
   void _onItem(Map<String, dynamic> v) {
     switch (v['type']) {
       case 'ready':
         _clientId = '${v['clientId']}';
-        debugPrint('[events] ready clientId=$_clientId');
+        _eventLog('ready clientId=$_clientId');
       case 'waterfall':
-        debugPrint("[events] waterfall ${v['event']} agent=${v['agentId']}");
+        _eventLog("waterfall ${v['event']} agent=${v['agentId']}");
         final id = '${v['eventId']}';
         if (id.isEmpty || id == 'null') return;
         _byId[id] = PendingInteraction(

@@ -358,6 +358,16 @@ class RelayTransport extends DshTransport {
         lastAuthError = c;
         onAuthRejected?.call(c, msg);
       }
+      if (c == 'auth-timeout') {
+        // 本地欢迎超时是暂态网络抖动，非鉴权死刑：只拆当前 WS 不置 _closed，
+        // 自动重连照常接管（对齐上方 rate-limited 分支「只拆连接不判死」）
+        final ws = _ws;
+        _ws = null;
+        try {
+          await ws?.close();
+        } catch (_) {}
+        throw TransportException('relay/auth-timeout', '连接超时：服务未响应，正在自动重试');
+      }
       await close();
       throw TransportException('relay/$c', msg);
     }
@@ -384,6 +394,10 @@ class RelayTransport extends DshTransport {
   /// 二进制载荷帧：[seq:8 BE][rid_len:1][rid][payload] → 解出 rid/payload 喂 _streams（下载块零膨胀）。
   void _handleBinaryFrame(Uint8List data) {
     if (data.length < 9) return;
+    // 头部 seq 与文本帧同源（服务端按同一 ring 分配）：推进断点，否则下载为主
+    // 流量时断点滞留在最后一次元数据帧上，重连会把已收的块整段重放
+    final seq = ByteData.sublistView(data, 0, 8).getUint64(0, Endian.big);
+    if (seq > _lastSeq) _lastSeq = seq;
     final ridLen = data[8];
     if (data.length < 9 + ridLen) return;
     final rid = utf8.decode(data.sublist(9, 9 + ridLen), allowMalformed: true);
@@ -679,10 +693,14 @@ class RelayTransport extends DshTransport {
     if (ws == null) throw TransportException('relay/not-connected', '中继未连接');
     final rid = '${DateTime.now().microsecondsSinceEpoch}-f${_ridSeq++}';
     final controller = StreamController<List<int>>(
-      // 消费方取消（中断下载）即清理登记，防僵尸流残留
+      // 消费方取消（中断下载）即清理登记，防僵尸流残留；尽力补发 dl-cancel
+      // 让桥端及时终止上游（不发也安全：桥靠 ack 停流，但资源收敛慢）
       onCancel: () {
         _streams.remove(rid);
         _streamMeta.remove(rid);
+        try {
+          ws.add(jsonEncode({'type': 'dl-cancel', 'rid': rid}));
+        } catch (_) {}
       },
     );
     _streams[rid] = controller;
@@ -713,7 +731,10 @@ class RelayTransport extends DshTransport {
     // snapshot RPC 晚 ~50ms 侥幸存活）。
     final opened = Completer<void>();
     _opening[rid] = opened;
-    debugPrint('[relay] >> ws-open rid=$rid path=$path cookie=${headers['cookie'] != null}');
+    // 含请求 path（release 泄漏会话路径到 logcat），对齐 <<ws-frame 包 kDebugMode
+    if (kDebugMode) {
+      debugPrint('[relay] >> ws-open rid=$rid path=$path cookie=${headers['cookie'] != null}');
+    }
     ws.add(jsonEncode({
       'type': 'ws-open',
       'rid': rid,
@@ -728,6 +749,11 @@ class RelayTransport extends DshTransport {
       _sockets.remove(rid);
       _opening.remove(rid);
       if (!sc.isClosed) sc.close();
+      // 尽力通知桥拆隧道：不发也安全（rid 无登记的帧被桥无声丢弃），
+      // 但桥端隧道与宿主侧 WS 会一直挂到对端超时（第二轮审查 #918）
+      try {
+        ws.add(jsonEncode({'type': 'ws-close', 'rid': rid}));
+      } catch (_) {}
       rethrow;
     } finally {
       _opening.remove(rid);
@@ -749,6 +775,25 @@ class RelayTransport extends DshTransport {
     _outQueue.clear();
     _ws?.close();
     _ws = null;
+    // 主动关闭也要收尾在途请求与流：否则设置页重连换 transport 后，旧连接上的
+    // 流式下载 await for 永不结束（_handleDisconnect 因 _closed 早退不再兜底）
+    // ——面板进度僵尸挂死（第二轮审查 #918）
+    for (final c in _pending.values) {
+      c.complete({'type': 'error', 'code': 'relay/closed', 'message': '连接已关闭'});
+    }
+    _pending.clear();
+    for (final o in _opening.values) {
+      if (!o.isCompleted) o.completeError(TransportException('relay/closed', '连接已关闭'));
+    }
+    _opening.clear();
+    for (final sc in _streams.values) {
+      if (!sc.isClosed) {
+        sc.addError(TransportException('relay/closed', '连接已关闭'));
+        sc.close();
+      }
+    }
+    _streams.clear();
+    _streamMeta.clear();
     for (final sc in _sockets.values) {
       if (!sc.isClosed) sc.close();
     }

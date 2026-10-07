@@ -241,6 +241,8 @@ class _ConnectPageState extends State<ConnectPage> {
   Future<void> _delete(EnvProfile p) async {
     _profiles.removeWhere((e) => e.id == p.id);
     await ProfileStore.clearToken(p.id);
+    // 敏感码一并清除：不留孤儿键在安全存储（对齐 dedupe 丢弃即清）
+    await ProfileStore.clearCodes(p.id);
     await _saveAll();
   }
 

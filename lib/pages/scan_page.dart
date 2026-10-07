@@ -47,6 +47,9 @@ class _ScanPageState extends State<ScanPage>
 
   void _pop(String raw) {
     if (_popped) return;
+    // 相册解码在 isolate 里可达秒级，期间用户可能已退出本页——
+    // 用已卸载 State 的 context 走 Navigator 会抛 framework 异常
+    if (!mounted) return;
     _popped = true;
     Navigator.of(context).pop(raw);
   }

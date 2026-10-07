@@ -502,6 +502,11 @@ class _DownloadSheetState extends State<_DownloadSheet> {
   String? _savedTo;
   bool _cancelled = false; // 用户取消（区别于失败：已下载部分保留可续传）
 
+  /// 下载实际落盘的文件名（消毒+同名避让后）。保存到系统下载必须复用这个名字
+  /// ——再跑一遍 sanitizeFileName 会因文件已存在追加 " (1)"，源路径错位导致
+  /// 保存恒失败（第二轮审查 #915）。
+  String? _diskFileName;
+
   Future<void> _download() async {
     setState(() {
       _downloading = true;
@@ -516,6 +521,7 @@ class _DownloadSheetState extends State<_DownloadSheet> {
       final dir = await getApplicationDocumentsDirectory();
       // 对端下发的文件名消毒（路径穿越/控制字符/同名覆盖）
       final safe = sanitizeFileName(widget.fileName, existingDir: dir.path);
+      _diskFileName = safe;
       final dest = File('${dir.path}/$safe');
       // 隧道流式（分块 + Range 断点续传）优先；直连不可用时回退 HttpClient。
       // total 由 fetchToFile 经 meta 帧算好传入（206 时 = 断点 + 剩余）。
@@ -576,7 +582,10 @@ class _DownloadSheetState extends State<_DownloadSheet> {
     setState(() => _savingDl = true);
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final safe = sanitizeFileName(widget.fileName, existingDir: dir.path);
+      // 复用下载时的实际文件名（消毒+同名避让只做一次）；理论兜底：字段缺失时
+      // 再消毒一次（不带 existingDir，不产生 (n) 错位）
+      final safe = _diskFileName ??
+          sanitizeFileName(widget.fileName);
       final loc = await saveFileToDownloads('${dir.path}/$safe', safe);
       if (!mounted) return;
       setState(() {

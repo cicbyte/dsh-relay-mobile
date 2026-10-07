@@ -132,14 +132,36 @@ class ProfileStore {
           .toList();
       final hydrated = await dedupe(list);
       // 敏感码（安全码/一次性配对码）不在 SharedPreferences JSON 里，
-      // 从安全存储回填（与设备令牌同等待遇）
+      // 从安全存储回填。存储为空时保留 fromJson 解析出的存量明文值——
+      // 否则无重复环境的常规用户升级后码即被空值静默清空（直连 401）；
+      // 检出存量明文则 load 末尾立即 save 完成一次性迁移（写入安全存储
+      // 并把 JSON 明文清掉，toJson 恒空）。
+      // per-key try：单个 key 抛 PlatformException（Keystore 失效/备份恢复
+      // 后常见）只按空串处理，不得让整个环境列表「消失」。
+      var migrated = false;
       for (final e in hydrated) {
-        e.lanCode = await _secure.read(key: _lanCodeKey(e.id)) ?? '';
-        e.pairingCode = await _secure.read(key: _pairCodeKey(e.id)) ?? '';
+        final lan = await _readCode(_lanCodeKey(e.id));
+        final pair = await _readCode(_pairCodeKey(e.id));
+        if (lan.isNotEmpty) e.lanCode = lan;
+        if (pair.isNotEmpty) e.pairingCode = pair;
+        if ((lan.isEmpty && e.lanCode.isNotEmpty) ||
+            (pair.isEmpty && e.pairingCode.isNotEmpty)) {
+          migrated = true;
+        }
       }
+      if (migrated) await save(hydrated);
       return hydrated;
     } catch (_) {
       return [];
+    }
+  }
+
+  /// 单 key 安全读取：失败按空串（对齐 tokenOf 的防御；Keystore 异常不放大）
+  static Future<String> _readCode(String key) async {
+    try {
+      return await _secure.read(key: key) ?? '';
+    } catch (_) {
+      return '';
     }
   }
 
@@ -233,6 +255,17 @@ class ProfileStore {
   static Future<void> clearToken(String profileId) async {
     try {
       await _secure.delete(key: _tokenKey(profileId));
+    } catch (_) {}
+  }
+
+  /// 清除环境的敏感码（删除环境时调用；对齐 dedupe「丢弃即清」语义，
+  /// 防止 prof.lanCode/pairCode 孤儿键残留安全存储——第二轮审查 #917）
+  static Future<void> clearCodes(String profileId) async {
+    try {
+      await _secure.delete(key: _lanCodeKey(profileId));
+    } catch (_) {}
+    try {
+      await _secure.delete(key: _pairCodeKey(profileId));
     } catch (_) {}
   }
 }
