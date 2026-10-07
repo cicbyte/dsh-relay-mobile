@@ -4,12 +4,14 @@
 // relay 隧道通用转发）。capabilities 协商：平台不支持的能力直接隐藏 UI；
 // 插件旧版本（路由 404）整页降级为升级提示。
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
+import '../device_info.dart';
 import '../dsh/dsh_client.dart';
-import '../theme.dart';
 
 class HostStatusPage extends StatefulWidget {
   final DshClient client;
@@ -305,6 +307,43 @@ class _HostStatusPageState extends State<HostStatusPage> {
     );
   }
 
+  bool _saving = false;
+
+  /// 点击放大：全屏黑底 + 双指缩放/拖动查看。
+  void _openViewer(Map<String, dynamic> r) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => _ImageViewerDialog(bytes: Uint8List.fromList(r['bytes'] as List<int>)),
+    ));
+  }
+
+  /// 手动保存：写 app 私有目录临时文件 → 系统下载（MediaStore 免权限）→ 删临时文件。
+  Future<void> _saveShot(BuildContext sheetCtx, Map<String, dynamic> r) async {
+    setState(() => _saving = true);
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final name = '${r['name']}';
+      final tmp = File('${dir.path}/$name');
+      await tmp.writeAsBytes(Uint8List.fromList(r['bytes'] as List<int>), flush: true);
+      try {
+        final loc = await saveFileToDownloads(tmp.path, name);
+        if (!sheetCtx.mounted) return;
+        ScaffoldMessenger.of(sheetCtx).showSnackBar(SnackBar(
+          content: Text(loc.isEmpty ? '已保存到系统下载：$name' : '已保存：$loc'),
+        ));
+      } finally {
+        try { await tmp.delete(); } catch (_) {}
+      }
+    } catch (e) {
+      if (sheetCtx.mounted) {
+        ScaffoldMessenger.of(sheetCtx)
+            .showSnackBar(SnackBar(content: Text('保存失败：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _capture(Map<String, dynamic> p) async {
     final theme = Theme.of(context);
     final win = '${p['win']}';
@@ -385,29 +424,50 @@ class _HostStatusPageState extends State<HostStatusPage> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.memory(
-                          Uint8List.fromList(r['bytes'] as List<int>),
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) =>
-                              const Text('图片解码失败'),
+                      GestureDetector(
+                        onTap: () => _openViewer(r),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.memory(
+                            Uint8List.fromList(r['bytes'] as List<int>),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) =>
+                                const Text('图片解码失败'),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        '${r['name']} · ${(((r['size'] as num?) ?? 0) / 1024).toStringAsFixed(0)} KB · 已存入共享区',
+                        '${r['name']} · ${(((r['size'] as num?) ?? 0) / 1024).toStringAsFixed(0)} KB · 临时预览，点图片可放大',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                      TextButton.icon(
-                        onPressed: () {
-                          Navigator.of(sheetCtx).pop();
-                          _capture(p);
-                        },
-                        icon: const Icon(Icons.refresh, size: 16),
-                        label: const Text('重新截取'),
+                      Row(
+                        children: [
+                          TextButton.icon(
+                            onPressed: _saving
+                                ? null
+                                : () => _saveShot(sheetCtx, r),
+                            icon: _saving
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2))
+                                : const Icon(Icons.save_alt, size: 16),
+                            label: const Text('保存到下载'),
+                          ),
+                          const SizedBox(width: 4),
+                          TextButton.icon(
+                            onPressed: () {
+                              Navigator.of(sheetCtx).pop();
+                              _capture(p);
+                            },
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('重新截取'),
+                          ),
+                        ],
                       ),
                     ],
                   );
@@ -423,6 +483,35 @@ class _HostStatusPageState extends State<HostStatusPage> {
             .showSnackBar(SnackBar(content: Text('$e')));
       }
     });
+  }
+}
+
+class _ImageViewerDialog extends StatelessWidget {
+  final Uint8List bytes;
+  const _ImageViewerDialog({required this.bytes});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            tooltip: '关闭',
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ],
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          maxScale: 8,
+          child: Image.memory(bytes, fit: BoxFit.contain),
+        ),
+      ),
+    );
   }
 }
 
