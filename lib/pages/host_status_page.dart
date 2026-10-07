@@ -341,10 +341,45 @@ class _HostStatusPageState extends State<HostStatusPage> {
                   }
                   final r = snap.data;
                   if (r == null) {
-                    return Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Text('截图失败（路由不可用）',
-                          style: theme.textTheme.bodySmall),
+                    // 桥端 400（黑帧/最小化/不可见）→ snap.error 带真实文案；
+                    // null（404 等）→ 路由不可用。
+                    final err = snap.error?.toString() ?? '';
+                    final msg = err.isNotEmpty
+                        ? err.replaceFirst(RegExp(r'^DshRpcException[^:]*:\s*'), '')
+                        : '截图失败：路由不可用（电脑端插件需更新）';
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.info_outline,
+                                size: 16,
+                                color: theme.colorScheme.onSurfaceVariant),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(msg,
+                                  style: theme.textTheme.bodySmall),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '提示：窗口被完全遮挡或最小化时，Chrome/VSCode/微信等'
+                          '会暂停渲染，抓取会失败；把窗口切到前台再试。',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            Navigator.of(sheetCtx).pop();
+                            _capture(p);
+                          },
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text('重新截取'),
+                        ),
+                      ],
                     );
                   }
                   return Column(
